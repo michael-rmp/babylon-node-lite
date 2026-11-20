@@ -43,6 +43,8 @@ shown by `git diff v1.4.0.0`):
   core/src/main/java/com/radixdlt/rev2/modules/REv2StateManagerModule.java
   core/src/main/java/com/radixdlt/utils/properties/RuntimeProperties.java
 
+  .github/README.md  (renamed to .github/WORKFLOWS.md, unchanged: GitHub would show it instead of
+             the README of this project)
   README.md  (replaced by a description of this project; the upstream README is kept, unchanged
              apart from a note on top, in docs/UPSTREAM-README.md)
 
