@@ -69,8 +69,10 @@ docs/lite-validator/ops/build-lite-package.sh ../release
 The script builds the Rust library (release) and the Java parts and writes
 `lite-validator-VERSION.tar.gz` and `lite-validator-VERSION.tar.gz.sha256` (~10 minutes after the
 first build). The package contains only the lite validator's entry point (`bin/lite-validator`)
-and `bin/keygen`; it cannot start a standard node. The build is reproducible: building the same
-commit twice gives the same `libcorerust.so` (its SHA-256 is in the `VERSION` file of the package).
+and `bin/keygen`; it cannot start a standard node. The build is reproducible: the same commit,
+built on another machine with the same distribution, gives the same `libcorerust.so` (its SHA-256 is
+in the `VERSION` file of the package; paths of the build machine are mapped to `/build` and
+`/cargo`), so a published package can be checked by building it again.
 
 Copy both files to the validator host and check the checksum there:
 
