@@ -62,6 +62,8 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 extern crate core;
 
 mod accumulator_tree;
@@ -70,6 +72,7 @@ mod committer;
 mod formatter;
 pub mod jni;
 mod limits;
+pub mod lite;
 mod mempool;
 mod metrics;
 mod moratorium_manager;

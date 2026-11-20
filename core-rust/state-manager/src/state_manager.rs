@@ -62,12 +62,16 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 use std::num::NonZeroUsize;
 
 use crate::jni::LedgerSyncLimitsConfig;
 use crate::jni_prelude::*;
 use crate::store::jmt_gc::*;
 use crate::store::proofs_gc::{LedgerProofsGc, LedgerProofsGcConfig};
+use crate::store::rocks_db::SecondaryDatabaseOptions;
+use crate::store::wal_links::PrimaryChangeProbe;
 
 use node_common::scheduler::{Metrics, Scheduler, Spawner, Tracker};
 use radix_transaction_scenarios::scenarios::default_testnet_scenarios_at_version;
@@ -164,6 +168,17 @@ impl StateManagerConfig {
     }
 }
 
+/// The parts of a [`StateManagerConfig`] needed regardless of how the database was opened.
+struct AssemblyConfig {
+    network_definition: NetworkDefinition,
+    mempool_config: Option<MempoolConfig>,
+    vertex_limits_config: Option<VertexLimitsConfig>,
+    logging_config: LoggingConfig,
+    protocol_config: ProtocolConfig,
+    no_fees: bool,
+    scenarios_execution_config: ScenariosExecutionConfig,
+}
+
 #[derive(Clone)]
 pub struct StateManager {
     pub network_definition: NetworkDefinition,
@@ -181,6 +196,11 @@ pub struct StateManager {
     pub protocol_update_executor: Arc<NodeProtocolUpdateExecutor>,
     pub ledger_metrics: Arc<LedgerMetrics>,
     pub formatter: Arc<Formatter>,
+    /// Lite validator: derives the current protocol state from the database.
+    pub lite_protocol_state_recompute: Arc<dyn Fn() -> ProtocolState + Send + Sync>,
+    /// Lite validator: tells whether the primary has written anything (`None` in a regular node,
+    /// and in a lite validator without WAL links).
+    pub lite_primary_change_probe: Option<PrimaryChangeProbe>,
 }
 
 impl StateManager {
@@ -221,6 +241,140 @@ impl StateManager {
             }
         };
 
+        Self::assemble(
+            raw_db,
+            AssemblyConfig {
+                network_definition,
+                mempool_config,
+                vertex_limits_config,
+                logging_config,
+                protocol_config,
+                no_fees,
+                scenarios_execution_config,
+            },
+            Some((
+                state_tree_gc_config,
+                ledger_proofs_gc_config,
+                ledger_sync_limits_config,
+            )),
+            mempool_relay_dispatcher,
+            genesis_data_resolver,
+            lock_factory,
+            metrics_registry,
+            scheduler,
+        )
+    }
+
+    /// Lite validator: creates a [`StateManager`] which only reads the state database of another,
+    /// running node (the "primary").
+    ///
+    /// The `database_backend_config.rocks_db_path` of the given config is the primary's
+    /// `state_manager` directory, which is opened as a RocksDB secondary instance; the given
+    /// `secondary_path` is a directory owned by this process (RocksDB keeps its info log there).
+    ///
+    /// Unlike [`Self::new()`], this:
+    /// - never writes to the primary's directory (no config persistence, no migrations),
+    /// - does not start the GC jobs (the primary runs them),
+    /// - does not resume protocol updates (the primary executes them).
+    ///
+    /// The `database_config` and the GC configs of the given config are ignored.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_lite(
+        config: StateManagerConfig,
+        secondary_path: PathBuf,
+        database_options: SecondaryDatabaseOptions,
+        mempool_relay_dispatcher: Option<MempoolRelayDispatcher>,
+        genesis_data_resolver: Arc<dyn ResolveGenesisData>,
+        lock_factory: &LockFactory,
+        metrics_registry: &MetricRegistry,
+        scheduler: &Scheduler<impl Spawner, impl Tracker, impl Metrics>,
+    ) -> Result<Self, String> {
+        let StateManagerConfig {
+            network_definition,
+            mempool_config,
+            vertex_limits_config,
+            database_backend_config,
+            database_config: _,
+            logging_config,
+            state_tree_gc_config: _,
+            ledger_proofs_gc_config: _,
+            ledger_sync_limits_config: _,
+            protocol_config,
+            no_fees,
+            scenarios_execution_config,
+        } = config;
+        let primary_path = PathBuf::from(database_backend_config.rocks_db_path);
+
+        let raw_db = ActualStateManagerDatabase::open_as_secondary(
+            &primary_path,
+            &secondary_path,
+            &database_options,
+        )
+        .map_err(|error| {
+            format!(
+                "cannot open {} as a RocksDB secondary: {}",
+                primary_path.display(),
+                error
+            )
+        })?;
+
+        let primary_change_probe = database_options.wal_links.then(|| {
+            PrimaryChangeProbe::new(
+                &primary_path,
+                &ActualStateManagerDatabase::wal_links_path(&secondary_path),
+            )
+        });
+
+        let mut state_manager = Self::assemble(
+            raw_db,
+            AssemblyConfig {
+                network_definition,
+                mempool_config,
+                vertex_limits_config,
+                logging_config,
+                protocol_config,
+                no_fees,
+                scenarios_execution_config,
+            },
+            None,
+            mempool_relay_dispatcher,
+            genesis_data_resolver,
+            lock_factory,
+            metrics_registry,
+            scheduler,
+        );
+        state_manager.lite_primary_change_probe = primary_change_probe;
+        Ok(state_manager)
+    }
+
+    /// Wires up the services around the given database.
+    /// The `gc_configs` are `None` for a lite validator, which must not write to the database: then
+    /// no GC jobs are started and no protocol update is resumed.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        raw_db: ActualStateManagerDatabase,
+        config: AssemblyConfig,
+        gc_configs: Option<(
+            StateTreeGcConfig,
+            LedgerProofsGcConfig,
+            LedgerSyncLimitsConfig,
+        )>,
+        mempool_relay_dispatcher: Option<MempoolRelayDispatcher>,
+        genesis_data_resolver: Arc<dyn ResolveGenesisData>,
+        lock_factory: &LockFactory,
+        metrics_registry: &MetricRegistry,
+        scheduler: &Scheduler<impl Spawner, impl Tracker, impl Metrics>,
+    ) -> Self {
+        let AssemblyConfig {
+            network_definition,
+            mempool_config,
+            vertex_limits_config,
+            logging_config,
+            protocol_config,
+            no_fees,
+            scenarios_execution_config,
+        } = config;
+
         let database = Arc::new(lock_factory.named("database").new_db_lock(raw_db));
 
         let moratorium_manager = Arc::new(UserTransactionMoratoriumManager::new(
@@ -231,6 +385,29 @@ impl StateManager {
         let transaction_validator = Arc::new(lock_factory.named("validator").new_rwlock(
             TransactionValidator::new(database.access_direct().deref(), &network_definition),
         ));
+
+        // Lite validator: nothing executes commits there, so the protocol state (which a commit
+        // tracks as it goes) is re-derived from the database instead - see `lite_catch_up()`.
+        let lite_protocol_state_recompute: Arc<dyn Fn() -> ProtocolState + Send + Sync> = {
+            let triggers = protocol_config.protocol_update_triggers.clone();
+            let overrides = protocol_config.protocol_update_content_overrides.clone();
+            let network = network_definition.clone();
+            let database = database.clone();
+            let genesis_data_resolver = genesis_data_resolver.clone();
+            let scenario_config = scenarios_execution_config.clone();
+            Arc::new(move || {
+                ProtocolState::compute_initial(
+                    &overrides,
+                    ProtocolUpdateContext {
+                        network: &network,
+                        database: &database,
+                        genesis_data_resolver: &genesis_data_resolver,
+                        scenario_config: &scenario_config,
+                    },
+                    &triggers,
+                )
+            })
+        };
 
         let protocol_manager = Arc::new(ProtocolManager::new(
             protocol_config.protocol_update_triggers,
@@ -358,24 +535,29 @@ impl StateManager {
                 raw_db_metrics_collector.run()
             });
 
-        // ... and for deleting the stale state hash tree nodes (a.k.a. "JMT GC")...
-        let state_tree_gc = StateTreeGc::new(database.clone(), state_tree_gc_config);
-        scheduler
-            .named("state_tree_gc")
-            .start_periodic(state_tree_gc.interval(), move || state_tree_gc.run());
+        let is_lite = gc_configs.is_none();
+        if let Some((state_tree_gc_config, ledger_proofs_gc_config, ledger_sync_limits_config)) =
+            gc_configs
+        {
+            // ... and for deleting the stale state hash tree nodes (a.k.a. "JMT GC")...
+            let state_tree_gc = StateTreeGc::new(database.clone(), state_tree_gc_config);
+            scheduler
+                .named("state_tree_gc")
+                .start_periodic(state_tree_gc.interval(), move || state_tree_gc.run());
 
-        // ... and for deleting the old, non-critical ledger proofs (a.k.a. "Proofs GC"):
-        let ledger_proofs_gc = LedgerProofsGc::new(
-            database.clone(),
-            ledger_proofs_gc_config,
-            ledger_sync_limits_config,
-        );
-        scheduler.named("ledger_proofs_gc").start_periodic(
-            ledger_proofs_gc.interval(),
-            move || {
-                ledger_proofs_gc.run();
-            },
-        );
+            // ... and for deleting the old, non-critical ledger proofs (a.k.a. "Proofs GC"):
+            let ledger_proofs_gc = LedgerProofsGc::new(
+                database.clone(),
+                ledger_proofs_gc_config,
+                ledger_sync_limits_config,
+            );
+            scheduler.named("ledger_proofs_gc").start_periodic(
+                ledger_proofs_gc.interval(),
+                move || {
+                    ledger_proofs_gc.run();
+                },
+            );
+        }
 
         let state_manager = Self {
             network_definition,
@@ -393,9 +575,13 @@ impl StateManager {
             protocol_update_executor,
             ledger_metrics,
             formatter,
+            lite_protocol_state_recompute,
+            lite_primary_change_probe: None,
         };
 
-        state_manager.resume_protocol_updates_if_any();
+        if !is_lite {
+            state_manager.resume_protocol_updates_if_any();
+        }
 
         state_manager
     }

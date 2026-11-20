@@ -62,6 +62,8 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 use crate::prelude::*;
 
 use std::time::Instant;
@@ -516,6 +518,26 @@ impl MempoolManager {
             &attempt,
         );
         pending_cache.track_transaction_result(transaction_metadata, attempt);
+    }
+
+    /// Lite validator: removes the transactions which another node has committed to the ledger
+    /// database, and (on an epoch change) those which have expired.
+    ///
+    /// Unlike [`Self::handle_committed_transactions()`], this does not have the results of
+    /// executing them. So the pending transaction result cache is not updated, and transactions
+    /// invalidated only by a committed subintent stay until the periodic re-evaluation finds them.
+    pub fn handle_externally_committed_transactions(
+        &self,
+        new_epoch: Option<Epoch>,
+        transaction_intent_hashes: impl IntoIterator<Item = TransactionIntentHash>,
+    ) {
+        let mut mempool = self.mempool.write();
+        if let Some(new_epoch) = new_epoch {
+            mempool.remove_txns_where_end_epoch_expired(new_epoch);
+        }
+        for transaction_intent_hash in transaction_intent_hashes {
+            mempool.remove_by_intent_hash(&transaction_intent_hash);
+        }
     }
 
     /// Removes all the transactions that have the given intent hashes.

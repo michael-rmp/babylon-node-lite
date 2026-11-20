@@ -62,6 +62,8 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 #![allow(clippy::too_many_arguments)]
 
 use super::overlays::*;
@@ -92,6 +94,24 @@ impl ExecutionCacheManager {
     pub fn clear(&self) {
         *self.execution_cache.lock() =
             Self::create_clean_execution_cache(self.database.lock().deref());
+    }
+
+    /// Lite validator: makes the given transaction root (the new top of the ledger database, which
+    /// another node has written) the base of the cache.
+    ///
+    /// If the cache knows that root - i.e. this node has itself executed the transactions leading
+    /// to it, on top of the previous base - then everything executed on top of it is kept, exactly
+    /// as when a regular node commits. Otherwise, the cache starts empty from the new base.
+    /// Returns whether the cache was kept.
+    pub fn rebase(&self, new_base_transaction_root: &TransactionTreeHash) -> bool {
+        let mut execution_cache = self.execution_cache.lock();
+        if execution_cache.is_known(new_base_transaction_root) {
+            execution_cache.progress_base(new_base_transaction_root);
+            true
+        } else {
+            *execution_cache = ExecutionCache::new(*new_base_transaction_root);
+            false
+        }
     }
 
     pub fn access_exclusively(&self) -> impl DerefMut<Target = ExecutionCache> + '_ {
@@ -233,6 +253,12 @@ impl ExecutionCache {
                 self.stage_tree.get_delta(&transaction_key)
             }
         }
+    }
+
+    /// Whether the given transaction root is the base or the result of a cached transaction.
+    pub fn is_known(&self, transaction_root: &TransactionTreeHash) -> bool {
+        *transaction_root == self.base_transaction_root
+            || self.transaction_root_to_key.contains_key(transaction_root)
     }
 
     pub fn progress_base(&mut self, new_base_transaction_root: &TransactionTreeHash) {

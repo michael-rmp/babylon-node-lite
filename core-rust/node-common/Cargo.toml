@@ -1,3 +1,4 @@
+# Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
 [package]
 name = "node-common"
 version = "0.1.0"
@@ -30,3 +31,6 @@ tracing-subscriber = { version = "=0.3.17" }
 opentelemetry = { version = "=0.18.0", default-features = false, features = ["rt-tokio", "trace"] }
 opentelemetry-jaeger = { version = "=0.17.0", features = ["rt-tokio"] }
 rocksdb = { workspace = true }
+
+[dev-dependencies]
+tempfile = { version = "=3.8.0" }

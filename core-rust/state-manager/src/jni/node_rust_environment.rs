@@ -61,6 +61,8 @@
  * Work. You assume all risks associated with Your use of the Work and the exercise of
  * permissions under this License.
  */
+
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
 use std::ops::Deref;
 use std::path::{PathBuf, MAIN_SEPARATOR};
 use std::str::FromStr;
@@ -76,7 +78,7 @@ use tracing::Level;
 use super::fatal_panic_handler::FatalPanicHandler;
 
 use crate::protocol::ProtocolManager;
-use crate::store::rocks_db::ActualStateManagerDatabase;
+use crate::store::rocks_db::{ActualStateManagerDatabase, SecondaryDatabaseOptions};
 use crate::transaction::Preparator;
 use p2p::rocks_db::{ActualAddressBookDatabase, ActualSafetyStoreDatabase};
 
@@ -94,6 +96,40 @@ extern "system" fn Java_com_radixdlt_environment_NodeRustEnvironment_init(
     });
 }
 
+/// Lite validator: like `init`, but the state database of another, running node is only read.
+/// - `j_config`: a `StateManagerConfig` whose database path is the other node's `state_manager`
+///   directory itself (not its parent);
+/// - `j_own_path`: UTF-8 bytes of a directory owned by this process (address book, safety store
+///   and RocksDB's secondary files live there);
+/// - the rest: see [`SecondaryDatabaseOptions`].
+#[no_mangle]
+extern "system" fn Java_com_radixdlt_environment_NodeRustEnvironment_initLite(
+    env: JNIEnv,
+    _class: JClass,
+    j_node_rust_env: JObject,
+    j_config: jbyteArray,
+    j_own_path: jbyteArray,
+    j_max_open_files: jni::sys::jint,
+    j_block_cache_mb: jni::sys::jint,
+    j_cache_index_and_filter_blocks: jni::sys::jboolean,
+    j_wal_links: jni::sys::jboolean,
+) {
+    jni_call(&env, || {
+        JNINodeRustEnvironment::init_lite(
+            &env,
+            j_node_rust_env,
+            j_config,
+            j_own_path,
+            SecondaryDatabaseOptions {
+                max_open_files: j_max_open_files,
+                block_cache_bytes: (j_block_cache_mb.max(1) as usize) * 1024 * 1024,
+                cache_index_and_filter_blocks: j_cache_index_and_filter_blocks != 0,
+                wal_links: j_wal_links != 0,
+            },
+        )
+    });
+}
+
 #[no_mangle]
 extern "system" fn Java_com_radixdlt_environment_NodeRustEnvironment_cleanup(
     env: JNIEnv,
@@ -105,6 +141,13 @@ extern "system" fn Java_com_radixdlt_environment_NodeRustEnvironment_cleanup(
     });
 }
 
+/// Lite validator: what distinguishes its environment from a regular node's.
+struct LiteEnvironmentConfig {
+    primary_path: PathBuf,
+    checked_entries: u64,
+    database_options: SecondaryDatabaseOptions,
+}
+
 pub struct JNINodeRustEnvironment {
     pub runtime: Arc<Runtime>,
     pub network: NetworkDefinition,
@@ -113,12 +156,58 @@ pub struct JNINodeRustEnvironment {
     pub running_task_tracker: UntilDropTracker,
     pub address_book_store: Arc<ActualAddressBookDatabase>,
     pub safety_store_store: Arc<ActualSafetyStoreDatabase>,
+    /// Lite validator: `Some` only if created by `init_lite`. Holds what is remembered between
+    /// catch-ups (see `StateManager::lite_follow()`).
+    pub lite_follow_state: Option<Arc<std::sync::Mutex<crate::lite::LiteFollowState>>>,
 }
 
 impl JNINodeRustEnvironment {
     pub fn init(env: &JNIEnv, j_node_rust_env: JObject, j_config: jbyteArray) {
         let (base_path, config) =
             Self::prepare_config(&jni_jbytearray_to_vector(env, j_config).unwrap());
+        Self::create(env, j_node_rust_env, config, base_path, None);
+    }
+
+    /// Lite validator: see `Java_com_radixdlt_environment_NodeRustEnvironment_initLite`.
+    /// Panics (i.e. throws to Java) if the start checks fail or the database cannot be opened.
+    pub fn init_lite(
+        env: &JNIEnv,
+        j_node_rust_env: JObject,
+        j_config: jbyteArray,
+        j_own_path: jbyteArray,
+        database_options: SecondaryDatabaseOptions,
+    ) {
+        let config =
+            StateManagerConfig::valid_from_java(&jni_jbytearray_to_vector(env, j_config).unwrap())
+                .unwrap();
+        let own_path = String::from_utf8(jni_jbytearray_to_vector(env, j_own_path).unwrap())
+            .expect("own path must be UTF-8");
+        let primary_path = PathBuf::from(&config.database_backend_config.rocks_db_path);
+
+        // Before anything else touches the primary's directory:
+        let checked_entries =
+            crate::lite::lite_start_checks(&primary_path, &PathBuf::from(&own_path))
+                .unwrap_or_else(|reason| panic!("lite validator start refused: {}", reason));
+        let lite = LiteEnvironmentConfig {
+            primary_path,
+            checked_entries,
+            database_options,
+        };
+        Self::create(env, j_node_rust_env, config, own_path, Some(lite));
+    }
+
+    /// Creates the environment and attaches it to the given Java object.
+    ///
+    /// The `base_path` holds the address book and the safety store. A regular node (`lite` is
+    /// `None`) owns the state database of the given config; a lite validator only reads it and
+    /// keeps RocksDB's secondary files under `base_path`.
+    fn create(
+        env: &JNIEnv,
+        j_node_rust_env: JObject,
+        config: StateManagerConfig,
+        base_path: String,
+        lite: Option<LiteEnvironmentConfig>,
+    ) {
         let network = config.network_definition.clone();
         let runtime = Arc::new(Runtime::new().unwrap());
 
@@ -142,19 +231,53 @@ impl JNINodeRustEnvironment {
             .track_running_tasks()
             .measured(metric_registry.deref());
 
-        let state_manager = StateManager::new(
-            config,
-            Some(MempoolRelayDispatcher::new(env, j_node_rust_env).unwrap()),
-            Arc::new(JavaGenesisDataResolver::new(env, j_node_rust_env).unwrap()),
-            &lock_factory,
-            &metric_registry,
-            &scheduler,
-        );
+        let mempool_relay_dispatcher =
+            Some(MempoolRelayDispatcher::new(env, j_node_rust_env).unwrap());
+        let genesis_data_resolver: Arc<dyn ResolveGenesisData> =
+            Arc::new(JavaGenesisDataResolver::new(env, j_node_rust_env).unwrap());
+
+        let is_lite = lite.is_some();
+        let state_manager = match lite {
+            None => StateManager::new(
+                config,
+                mempool_relay_dispatcher,
+                genesis_data_resolver,
+                &lock_factory,
+                &metric_registry,
+                &scheduler,
+            ),
+            Some(lite) => {
+                tracing::info!(
+                    "Lite validator: reading {} ({} entries checked, none writable); own \
+                     directory {}; {:?}",
+                    lite.primary_path.display(),
+                    lite.checked_entries,
+                    base_path,
+                    lite.database_options,
+                );
+                StateManager::new_lite(
+                    config,
+                    Self::combine(&base_path, "state_manager_secondary"),
+                    lite.database_options,
+                    mempool_relay_dispatcher,
+                    genesis_data_resolver,
+                    &lock_factory,
+                    &metric_registry,
+                    &scheduler,
+                )
+                .unwrap_or_else(|reason| panic!("lite validator start failed: {}", reason))
+            }
+        };
 
         let running_task_tracker = scheduler.into_task_tracker();
 
         let address_book_db_path = Self::combine(&base_path, "address_book");
         let safety_store_db_path = Self::combine(&base_path, "consensus_safety_store");
+        let lite_follow_state = is_lite.then(|| {
+            Arc::new(std::sync::Mutex::new(crate::lite::LiteFollowState::new(
+                &metric_registry,
+            )))
+        });
         let jni_node_rust_env = JNINodeRustEnvironment {
             runtime,
             network,
@@ -163,6 +286,7 @@ impl JNINodeRustEnvironment {
             running_task_tracker,
             address_book_store: Arc::new(ActualAddressBookDatabase::new(address_book_db_path)),
             safety_store_store: Arc::new(ActualSafetyStoreDatabase::new(safety_store_db_path)),
+            lite_follow_state,
         };
 
         env.set_rust_field(j_node_rust_env, POINTER_JNI_FIELD_NAME, jni_node_rust_env)

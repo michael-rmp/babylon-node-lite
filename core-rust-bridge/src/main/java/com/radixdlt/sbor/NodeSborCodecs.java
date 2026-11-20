@@ -64,6 +64,8 @@
 
 package com.radixdlt.sbor;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.hash.HashCode;
 import com.google.common.reflect.TypeToken;
 import com.radixdlt.crypto.*;
@@ -71,6 +73,7 @@ import com.radixdlt.environment.*;
 import com.radixdlt.exceptions.StateManagerRuntimeError;
 import com.radixdlt.genesis.*;
 import com.radixdlt.identifiers.TID;
+import com.radixdlt.lite.LiteCatchUpError;
 import com.radixdlt.mempool.MempoolError;
 import com.radixdlt.mempool.ProposalTransactionsRequest;
 import com.radixdlt.mempool.RustMempoolConfig;
@@ -166,6 +169,7 @@ public final class NodeSborCodecs {
     SyncableTxnsAndProofRequest.registerCodec(codecMap);
     TxnsAndProof.registerCodec(codecMap);
     GetSyncableTxnsAndProofError.registerCodec(codecMap);
+    LiteCatchUpError.registerCodec(codecMap);
     PublicKey.registerCodec(codecMap);
     PublicKeyHash.registerCodec(codecMap);
     ECDSASecp256k1PublicKey.registerCodec(codecMap);

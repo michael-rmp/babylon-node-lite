@@ -1,3 +1,4 @@
+# Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
 [package]
 name = "state-manager"
 version = "0.1.0"
@@ -32,6 +33,7 @@ rand = { workspace = true }
 lru = { version = "=0.8.1", default-features = false }
 slotmap = { version = "=1.0.6" }
 im = { version = "=15.1.0" }
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = { version = "=3.8.0" }

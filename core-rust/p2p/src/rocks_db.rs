@@ -62,6 +62,8 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 use std::path::PathBuf;
 
 use crate::prelude::*;
@@ -135,9 +137,7 @@ fn open_rw_context<R: WriteableRocks>(
 impl ActualAddressBookDatabase {
     pub fn new(root_path: PathBuf) -> ActualAddressBookDatabase {
         AddressBookDatabase {
-            rocks: DirectRocks {
-                db: new_rocks_db(root_path, &ALL_ADDRESS_BOOK_COLUMN_FAMILIES),
-            },
+            rocks: DirectRocks::new(new_rocks_db(root_path, &ALL_ADDRESS_BOOK_COLUMN_FAMILIES)),
         }
     }
 }
@@ -145,9 +145,7 @@ impl ActualAddressBookDatabase {
 impl ActualSafetyStoreDatabase {
     pub fn new(root_path: PathBuf) -> ActualSafetyStoreDatabase {
         ActualSafetyStoreDatabase {
-            rocks: DirectRocks {
-                db: new_rocks_db(root_path, &ALL_SAFETY_STORE_COLUMN_FAMILIES),
-            },
+            rocks: DirectRocks::new(new_rocks_db(root_path, &ALL_SAFETY_STORE_COLUMN_FAMILIES)),
         }
     }
 }

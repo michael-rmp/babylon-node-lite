@@ -1,3 +1,4 @@
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
 use crate::prelude::*;
 
 // This file contains types and utilities for managing the (dynamic) protocol state of a running
@@ -64,6 +65,13 @@ impl ProtocolManager {
         self.protocol_metrics
             .update(&end_state.protocol_state, end_state.epoch_change.as_ref());
         *self.protocol_state.write() = end_state.protocol_state.clone();
+    }
+
+    /// Lite validator: sets the protocol state which was derived from the database (a regular
+    /// node tracks it while committing, see [`Self::update_protocol_state_and_metrics()`]).
+    pub fn replace_protocol_state(&self, protocol_state: ProtocolState) {
+        self.protocol_metrics.update(&protocol_state, None);
+        *self.protocol_state.write() = protocol_state;
     }
 
     pub fn newest_protocol_version(&self) -> ProtocolVersionName {

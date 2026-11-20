@@ -62,7 +62,10 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 use crate::prelude::*;
+use crate::store::wal_links::WalLinkDirectory;
 
 use crate::store::column_families::*;
 use crate::store::historical_state::StateTreeBasedSubstateDatabase;
@@ -143,6 +146,24 @@ impl<'db> Snapshottable<'db> for StateManagerDatabase<DirectRocks> {
     }
 }
 
+/// Lite validator: what bounds the memory use of a database opened as a secondary instance.
+#[derive(Debug, Clone)]
+pub struct SecondaryDatabaseOptions {
+    /// RocksDB's `max_open_files` (`-1`: all). Unless `cache_index_and_filter_blocks` is set, the
+    /// index and filter blocks of every open file stay in memory.
+    pub max_open_files: i32,
+    /// Capacity of the block cache shared by all column families.
+    pub block_cache_bytes: usize,
+    /// Whether index and filter blocks live in the block cache (and are thus bounded by its
+    /// capacity, at the price of re-reading evicted ones) instead of staying in memory for as
+    /// long as their file is open.
+    pub cache_index_and_filter_blocks: bool,
+    /// Whether the secondary gets a WAL directory of its own, holding links to the primary's WAL
+    /// files (see [`WalLinkDirectory`]). Without it, every catch-up lists the primary's whole
+    /// database directory.
+    pub wal_links: bool,
+}
+
 /// A RocksDB-backed persistence layer for state manager.
 pub struct StateManagerDatabase<R> {
     /// Database config.
@@ -174,7 +195,7 @@ impl ActualStateManagerDatabase {
 
         let state_manager_database = StateManagerDatabase {
             config,
-            rocks: DirectRocks { db },
+            rocks: DirectRocks::new(db),
         };
 
         state_manager_database.validate_and_persist_new_config()?;
@@ -223,7 +244,7 @@ impl ActualStateManagerDatabase {
                 enable_entity_listing_indices: false,
                 keep_previous_substate_values: true,
             },
-            rocks: DirectRocks { db },
+            rocks: DirectRocks::new(db),
         }
     }
 
@@ -259,12 +280,147 @@ impl ActualStateManagerDatabase {
                 enable_entity_listing_indices: false,
                 keep_previous_substate_values: true,
             },
-            rocks: DirectRocks { db },
+            rocks: DirectRocks::new(db),
         }
     }
 
     pub fn try_catchup_with_primary(&self) {
         self.rocks.try_catchup_with_primary();
+    }
+
+    /// Lite validator: opens all state manager column families as a RocksDB secondary instance.
+    ///
+    /// Unlike [`Self::new`], this never writes to the primary directory: no config persistence,
+    /// no migrations, no GC. Unlike [`Self::new_as_secondary`], errors are returned instead of
+    /// panicking, and the caller controls what bounds the memory use (see
+    /// [`SecondaryDatabaseOptions`]).
+    /// Any `create_if_missing` / `create_missing_column_families` settings are forced off, and a
+    /// missing database is an error (nothing is created at `primary_path`).
+    pub fn open_as_secondary(
+        primary_path: &std::path::Path,
+        secondary_path: &std::path::Path,
+        options: &SecondaryDatabaseOptions,
+    ) -> Result<Self, String> {
+        // RocksDB creates a missing directory even when opening as a secondary. That would be a
+        // write into the primary's path, so a missing database is refused before RocksDB sees it.
+        if !primary_path.join("CURRENT").is_file() {
+            return Err(format!(
+                "{} does not contain a RocksDB database (no CURRENT file)",
+                primary_path.display()
+            ));
+        }
+        let mut db_opts = Options::default();
+        db_opts.create_if_missing(false);
+        db_opts.create_missing_column_families(false);
+        db_opts.set_max_open_files(options.max_open_files);
+        // The info log lives in `secondary_path`. Without limits, it grows by a line per catch-up
+        // and by warnings about memtables (about 1 GB in 13 hours).
+        db_opts.set_log_level(rocksdb::LogLevel::Error);
+        db_opts.set_max_log_file_size(10 * 1024 * 1024);
+        db_opts.set_keep_log_file_num(2);
+
+        let keep_alive = Arc::new(());
+        if options.wal_links {
+            let links_path = Self::wal_links_path(secondary_path);
+            let wal_links = WalLinkDirectory::prepare(primary_path, &links_path)?;
+            db_opts.set_wal_dir(wal_links.links_path());
+            wal_links.spawn_watcher(Arc::downgrade(&keep_alive));
+        }
+
+        // One block cache for all column families. (By default, each column family would get a
+        // cache of its own - 32 MB each, with nothing bounding their sum.)
+        let block_cache = rocksdb::Cache::new_lru_cache(options.block_cache_bytes);
+        let mut table_options = rocksdb::BlockBasedOptions::default();
+        table_options.set_block_cache(&block_cache);
+        if options.cache_index_and_filter_blocks {
+            table_options.set_cache_index_and_filter_blocks(true);
+        }
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+
+        let column_families: Vec<ColumnFamilyDescriptor> = ALL_STATE_MANAGER_COLUMN_FAMILIES
+            .iter()
+            .map(|cf| ColumnFamilyDescriptor::new(cf.to_string(), cf_options.clone()))
+            .collect();
+
+        let db = DB::open_cf_descriptors_as_secondary(
+            &db_opts,
+            primary_path,
+            secondary_path,
+            column_families,
+        )
+        .map_err(|error| error.to_string())?;
+
+        let mut database = StateManagerDatabase {
+            config: DatabaseConfig {
+                enable_local_transaction_execution_index: false,
+                enable_account_change_index: false,
+                enable_historical_substate_values: false,
+                enable_entity_listing_indices: false,
+                keep_previous_substate_values: true,
+            },
+            rocks: DirectRocks::new_secondary_with_keep_alive(db, keep_alive),
+        };
+        // The primary maintains (or not) these indices and records its choice in the database;
+        // readers of this instance must see the same. (The other optional features have no such
+        // simple record, and stay off.)
+        let stored = database.read_config_state();
+        database.config.enable_local_transaction_execution_index = stored
+            .local_transaction_execution_index_enabled
+            .unwrap_or(false);
+        database.config.enable_account_change_index =
+            stored.account_change_index_enabled.unwrap_or(false);
+        Ok(database)
+    }
+
+    /// Lite validator: where a secondary instance at the given path keeps the links to the
+    /// primary's WAL files (see [`SecondaryDatabaseOptions::wal_links`]).
+    pub fn wal_links_path(secondary_path: &std::path::Path) -> PathBuf {
+        let mut links_path = secondary_path.as_os_str().to_owned();
+        links_path.push("_wal_links");
+        PathBuf::from(links_path)
+    }
+
+    /// Lite validator: like [`Self::try_catchup_with_primary`], but returns the error instead of
+    /// panicking (e.g. when the primary deleted a WAL file in the meantime).
+    pub fn catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
+        self.rocks.try_catch_up_with_primary_checked()
+    }
+
+    /// Lite validator: see [`DirectRocks::lock_view_for_catch_up()`].
+    pub fn lock_view_for_catch_up(&self, timeout: std::time::Duration) -> Option<impl Sized + '_> {
+        self.rocks.lock_view_for_catch_up(timeout)
+    }
+
+    /// Lite validator diagnostics: the largest value of an integer RocksDB property over all state
+    /// manager column families. This is the right figure for what the column families share,
+    /// like the block cache (e.g. `rocksdb.block-cache-usage`).
+    pub fn max_int_property_over_column_families(&self, property: &str) -> u64 {
+        self.int_property_per_column_family(property)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Lite validator diagnostics: sums an integer RocksDB property (e.g.
+    /// `rocksdb.cur-size-all-mem-tables`) over all state manager column families.
+    pub fn sum_int_property_over_column_families(&self, property: &str) -> u64 {
+        self.int_property_per_column_family(property).sum()
+    }
+
+    fn int_property_per_column_family<'a>(
+        &'a self,
+        property: &'a str,
+    ) -> impl Iterator<Item = u64> + 'a {
+        ALL_STATE_MANAGER_COLUMN_FAMILIES
+            .iter()
+            .filter_map(move |cf| {
+                let handle = self.rocks.db.cf_handle(cf)?;
+                self.rocks
+                    .db
+                    .property_int_value_cf(handle, property)
+                    .ok()
+                    .flatten()
+            })
     }
 }
 

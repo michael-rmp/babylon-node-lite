@@ -62,8 +62,11 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 pub mod db_checkpoints;
 pub mod fatal_panic_handler;
+pub mod lite;
 pub mod mempool;
 pub mod node_rust_environment;
 pub mod p2p;

@@ -62,6 +62,8 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 mod constants;
 
 /// A workaround for including the symbols defined in `state_manager`, `core_api_server` and
@@ -78,6 +80,7 @@ fn export_extern_functions() {
 
     // state-manager
     state_manager::jni::db_checkpoints::export_extern_functions();
+    state_manager::jni::lite::export_extern_functions();
     state_manager::jni::mempool::export_extern_functions();
     state_manager::jni::node_rust_environment::export_extern_functions();
     state_manager::jni::protocol_update::export_extern_functions();

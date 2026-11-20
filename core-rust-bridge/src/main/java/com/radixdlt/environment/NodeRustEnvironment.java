@@ -64,6 +64,8 @@
 
 package com.radixdlt.environment;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.reflect.TypeToken;
 import com.radixdlt.genesis.GenesisProvider;
 import com.radixdlt.mempool.MempoolRelayDispatcher;
@@ -100,6 +102,68 @@ public final class NodeRustEnvironment implements AutoCloseable {
     final var encodedConfig =
         NodeSborCodecs.encode(config, NodeSborCodecs.resolveCodec(new TypeToken<>() {}));
     init(this, encodedConfig);
+  }
+
+  /**
+   * Lite validator: creates an environment which only reads the state database of another, running
+   * node and never writes to it.
+   *
+   * @param config its database path must be the other node's {@code state_manager} directory itself
+   *     (not its parent)
+   * @param ownPath a directory owned by this process; address book, safety store and RocksDB's
+   *     secondary files live there
+   * @param maxOpenFiles RocksDB's {@code max_open_files} for the primary's database
+   * @param blockCacheMb capacity of the one block cache shared by all its column families
+   * @param cacheIndexAndFilterBlocks whether index and filter blocks live in that cache (bounded by
+   *     its capacity) instead of staying in memory for as long as their file is open
+   * @param walLinks whether to keep links to the primary's WAL files in the own directory, so that
+   *     catching up does not have to list the primary's whole database directory
+   */
+  public static NodeRustEnvironment createLite(
+      GenesisProvider genesisProvider,
+      MempoolRelayDispatcher<RawNotarizedTransaction> mempoolRelayDispatcher,
+      FatalPanicHandler fatalPanicHandler,
+      StateManagerConfig config,
+      String ownPath,
+      int maxOpenFiles,
+      int blockCacheMb,
+      boolean cacheIndexAndFilterBlocks,
+      boolean walLinks) {
+    return new NodeRustEnvironment(
+        genesisProvider,
+        mempoolRelayDispatcher,
+        fatalPanicHandler,
+        config,
+        ownPath,
+        maxOpenFiles,
+        blockCacheMb,
+        cacheIndexAndFilterBlocks,
+        walLinks);
+  }
+
+  private NodeRustEnvironment(
+      GenesisProvider genesisProvider,
+      MempoolRelayDispatcher<RawNotarizedTransaction> mempoolRelayDispatcher,
+      FatalPanicHandler fatalPanicHandler,
+      StateManagerConfig config,
+      String ownPath,
+      int maxOpenFiles,
+      int blockCacheMb,
+      boolean cacheIndexAndFilterBlocks,
+      boolean walLinks) {
+    this.genesisProvider = genesisProvider;
+    this.mempoolRelayDispatcher = mempoolRelayDispatcher;
+    this.fatalPanicHandler = fatalPanicHandler;
+    final var encodedConfig =
+        NodeSborCodecs.encode(config, NodeSborCodecs.resolveCodec(new TypeToken<>() {}));
+    initLite(
+        this,
+        encodedConfig,
+        ownPath.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+        maxOpenFiles,
+        blockCacheMb,
+        cacheIndexAndFilterBlocks,
+        walLinks);
   }
 
   @Override
@@ -145,6 +209,15 @@ public final class NodeRustEnvironment implements AutoCloseable {
   }
 
   private static native void init(NodeRustEnvironment nodeRustEnvironment, byte[] config);
+
+  private static native void initLite(
+      NodeRustEnvironment nodeRustEnvironment,
+      byte[] config,
+      byte[] ownPath,
+      int maxOpenFiles,
+      int blockCacheMb,
+      boolean cacheIndexAndFilterBlocks,
+      boolean walLinks);
 
   private static native void cleanup(NodeRustEnvironment nodeRustEnvironment);
 }

@@ -62,6 +62,8 @@
  * permissions under this License.
  */
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 use crate::prelude::*;
 
 pub use rocks_db::{ActualStateManagerDatabase, StateManagerDatabase};
@@ -74,6 +76,7 @@ pub mod jmt_gc;
 pub mod proofs_gc;
 pub mod rocks_db;
 mod traits;
+pub mod wal_links;
 
 #[derive(Debug, Clone, Sbor)]
 pub struct DatabaseBackendConfig {
