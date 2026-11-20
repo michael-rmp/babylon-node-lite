@@ -64,6 +64,8 @@
 
 package com.radixdlt.consensus.epoch;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.util.concurrent.RateLimiter;
 import com.google.inject.*;
 import com.google.inject.multibindings.Multibinder;
@@ -102,6 +104,9 @@ public class EpochsConsensusModule extends AbstractModule {
     OptionalBinder.newOptionalBinder(binder(), UserTransactionMoratoriumProvider.class)
         .setDefault()
         .toInstance(UserTransactionMoratoriumProvider.NONE);
+    OptionalBinder.newOptionalBinder(binder(), VoteWithholding.class)
+        .setDefault()
+        .toInstance(VoteWithholding.NONE);
     var eventBinder =
         Multibinder.newSetBinder(binder(), new TypeLiteral<Class<?>>() {}, LocalEvents.class)
             .permitDuplicates();
@@ -318,6 +323,7 @@ public class EpochsConsensusModule extends AbstractModule {
       Metrics metrics,
       ProposalGenerator proposalGenerator,
       UserTransactionMoratoriumProvider userTransactionMoratoriumProvider,
+      VoteWithholding voteWithholding,
       Hasher hasher,
       EventDispatcher<EpochLocalTimeoutOccurrence> timeoutEventDispatcher,
       ScheduledEventDispatcher<Epoched<ScheduledLocalTimeout>> localTimeoutSender,
@@ -344,6 +350,7 @@ public class EpochsConsensusModule extends AbstractModule {
             timeoutCalculator,
             proposalGenerator,
             userTransactionMoratoriumProvider,
+            voteWithholding,
             (n, m) -> {
               var nodeId = NodeId.fromPublicKey(n.getKey());
               proposalDispatcher.dispatch(nodeId, m);

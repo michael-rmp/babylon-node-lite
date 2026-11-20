@@ -64,8 +64,11 @@
 
 package com.radixdlt;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.base.Preconditions;
 import com.google.inject.AbstractModule;
+import com.google.inject.util.Modules;
 import com.radixdlt.addressing.Addressing;
 import com.radixdlt.api.CoreApiServerModule;
 import com.radixdlt.api.EngineStateApiServerModule;
@@ -83,6 +86,10 @@ import com.radixdlt.keys.PersistedBFTKeyModule;
 import com.radixdlt.keys.SelfValidatorInfoFromGenesisModule;
 import com.radixdlt.keys.SelfValidatorInfoModule;
 import com.radixdlt.lang.Option;
+import com.radixdlt.lite.LiteConfig;
+import com.radixdlt.lite.LiteDispatcherOverrideModule;
+import com.radixdlt.lite.LiteFollowerModule;
+import com.radixdlt.lite.LiteStateManagerOverrideModule;
 import com.radixdlt.logger.EventLoggerConfig;
 import com.radixdlt.logger.EventLoggerModule;
 import com.radixdlt.mempool.*;
@@ -164,20 +171,39 @@ public final class RadixNodeModule extends AbstractModule {
 
     install(new RxEnvironmentModule());
 
-    install(new DispatcherModule());
+    // A lite validator only reads the ledger database of another node (see LiteConfig).
+    final var liteConfig = LiteConfig.fromRuntimeProperties(properties);
+
+    if (liteConfig.isPresent()) {
+      install(Modules.override(new DispatcherModule()).with(new LiteDispatcherOverrideModule()));
+    } else {
+      install(new DispatcherModule());
+    }
 
     // Consensus
     install(new EventLoggerModule(EventLoggerConfig.addressed(addressing)));
 
-    final var selfValidatorAddressConfig =
-        SelfValidatorAddressConfig.fromRuntimeProperties(properties, addressing);
-    switch (selfValidatorAddressConfig) {
-      case SelfValidatorAddressConfig.Set set -> install(
-          new SelfValidatorInfoModule(Optional.of(set.validatorComponentAddress())));
-      case SelfValidatorAddressConfig.FromGenesis fromGenesis -> install(
-          new SelfValidatorInfoFromGenesisModule());
-      case SelfValidatorAddressConfig.Unset unset -> install(
-          new SelfValidatorInfoModule(Optional.empty()));
+    if (liteConfig.isPresent()) {
+      // A lite validator gets a validator address only from consensus.validator_address, never
+      // from the genesis (for a regular node, an unset configuration means "resolve from
+      // genesis"). LiteIdentityGuard checks the address and key against the validator set.
+      final var validatorAddress = properties.get("consensus.validator_address", "").trim();
+      install(
+          new SelfValidatorInfoModule(
+              validatorAddress.isEmpty()
+                  ? Optional.empty()
+                  : Optional.of(addressing.decodeValidatorAddress(validatorAddress))));
+    } else {
+      final var selfValidatorAddressConfig =
+          SelfValidatorAddressConfig.fromRuntimeProperties(properties, addressing);
+      switch (selfValidatorAddressConfig) {
+        case SelfValidatorAddressConfig.Set set -> install(
+            new SelfValidatorInfoModule(Optional.of(set.validatorComponentAddress())));
+        case SelfValidatorAddressConfig.FromGenesis fromGenesis -> install(
+            new SelfValidatorInfoFromGenesisModule());
+        case SelfValidatorAddressConfig.Unset unset -> install(
+            new SelfValidatorInfoModule(Optional.empty()));
+      }
     }
 
     install(new PersistedBFTKeyModule());
@@ -246,14 +272,22 @@ public final class RadixNodeModule extends AbstractModule {
     final long syncPatience = properties.get("sync.patience", 5000L);
     final int syncStatusCheckMaxPeers = properties.get("sync.status_check.max_peers", 10);
     final long syncStatusInterval = properties.get("sync.status_check.interval_ms", 3000L);
-    install(
-        new SyncServiceModule(
-            SyncRelayConfig.of(syncPatience, syncStatusCheckMaxPeers, syncStatusInterval)));
+    // For a lite validator, following the primary's database replaces the ledger sync.
+    final var syncRelayConfig =
+        SyncRelayConfig.of(syncPatience, syncStatusCheckMaxPeers, syncStatusInterval);
+    if (liteConfig.isPresent()) {
+      install(new LiteFollowerModule(liteConfig.get()));
+      bind(SyncRelayConfig.class).toInstance(syncRelayConfig); // only shown by the System API
+    } else {
+      install(new SyncServiceModule(syncRelayConfig));
+    }
 
     // Epochs - Consensus
     install(new EpochsConsensusModule());
     // Epochs - Sync
-    install(new EpochsSyncModule());
+    if (liteConfig.isEmpty()) {
+      install(new EpochsSyncModule());
+    }
 
     // Storage directory
     install(new StorageLocationFromPropertiesModule());
@@ -382,7 +416,7 @@ public final class RadixNodeModule extends AbstractModule {
       protocolConfig = ProtocolConfig.resolveForNetwork(NetworkDefinition.from(network));
     }
 
-    install(
+    final var stateManagerModule =
         REv2StateManagerModule.create(
             genesisProvider,
             ProposalLimitsConfig.from(vertexLimitsConfig),
@@ -393,7 +427,20 @@ public final class RadixNodeModule extends AbstractModule {
             ledgerProofsGcConfig,
             ledgerSyncLimitsConfig,
             protocolConfig,
-            ScenariosExecutionConfig.ALL_FOR_NETWORK));
+            ScenariosExecutionConfig.ALL_FOR_NETWORK);
+    if (liteConfig.isPresent()) {
+      // The regular state manager and ledger recovery, with the lite validator's differences:
+      install(
+          Modules.override(stateManagerModule, new REv2LedgerRecoveryModule())
+              .with(
+                  new LiteStateManagerOverrideModule(
+                      liteConfig.get(),
+                      genesisProvider,
+                      ProposalLimitsConfig.from(vertexLimitsConfig))));
+    } else {
+      install(stateManagerModule);
+      install(new REv2LedgerRecoveryModule());
+    }
 
     // Persistence
     install(new PersistentSafetyStateStoreModule());
@@ -401,7 +448,6 @@ public final class RadixNodeModule extends AbstractModule {
 
     // Recovery
     install(new EpochsSafetyRecoveryModule());
-    install(new REv2LedgerRecoveryModule());
     install(new REv2ConsensusRecoveryModule());
 
     install(new MetricsModule());
@@ -444,10 +490,13 @@ public final class RadixNodeModule extends AbstractModule {
     // Capabilities
     var capabilitiesLedgerSyncEnabled =
         properties.get("capabilities.ledger_sync.enabled", BooleanUtils::parseBoolean);
+    // A lite validator has no ledger sync service: it tells its peers not to ask it.
     LedgerSyncCapability.Builder ledgerSyncCapabilityBuilder =
-        capabilitiesLedgerSyncEnabled
-            .map(LedgerSyncCapability.Builder::new)
-            .orElse(LedgerSyncCapability.Builder.asDefault());
+        liteConfig.isPresent()
+            ? new LedgerSyncCapability.Builder(false)
+            : capabilitiesLedgerSyncEnabled
+                .map(LedgerSyncCapability.Builder::new)
+                .orElse(LedgerSyncCapability.Builder.asDefault());
     bind(Capabilities.class)
         .toInstance(
             new Capabilities(

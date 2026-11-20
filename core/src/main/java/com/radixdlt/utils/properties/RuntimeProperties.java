@@ -64,6 +64,8 @@
 
 package com.radixdlt.utils.properties;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import static com.radixdlt.utils.RadixConstants.STANDARD_CHARSET;
 
 import com.radixdlt.utils.BooleanUtils;
@@ -202,6 +204,11 @@ public class RuntimeProperties {
     try (var propertiesOutput = new FileOutputStream(filename)) {
       this.properties.store(propertiesOutput, "");
     }
+  }
+
+  /** Returns the keys of all set properties. */
+  public java.util.Set<String> keys() {
+    return this.properties.stringPropertyNames();
   }
 
   /**

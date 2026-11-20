@@ -64,12 +64,19 @@
 
 package com.radixdlt;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.base.Stopwatch;
 import com.radixdlt.bootstrap.RadixNodeBootstrapper;
+import com.radixdlt.lite.LiteConfig;
+import com.radixdlt.lite.LiteMustHaltException;
+import com.radixdlt.lite.LiteValidatorApplication;
 import com.radixdlt.monitoring.ApplicationVersion;
 import com.radixdlt.utils.MemoryLeakDetector;
 import com.radixdlt.utils.properties.RuntimeProperties;
 import java.net.URISyntaxException;
+import java.util.List;
+import java.util.function.Function;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -83,11 +90,39 @@ public final class RadixNodeApplication {
   }
 
   public static void main(String[] args) {
+    run(
+        args,
+        properties ->
+            LiteConfig.fromRuntimeProperties(properties).isPresent()
+                ? List.of(
+                    "%s is set, which makes this a lite validator configuration: start it with %s"
+                        .formatted(
+                            LiteConfig.PRIMARY_STATE_MANAGER_PATH_KEY,
+                            LiteValidatorApplication.class.getName()))
+                : List.of());
+  }
+
+  /**
+   * Starts a node with the configuration from the given command line, unless the given check finds
+   * a reason not to.
+   *
+   * @param configurationCheck returns the reasons why this entry point must not start the given
+   *     configuration (empty if fine)
+   */
+  public static void run(
+      String[] args, Function<RuntimeProperties, List<String>> configurationCheck) {
     try {
       MemoryLeakDetector.start();
       logVersion();
       dumpExecutionLocation();
       final var properties = RuntimeProperties.fromCommandLineArgs(args);
+      final var problems = configurationCheck.apply(properties);
+      if (!problems.isEmpty()) {
+        problems.forEach(problem -> log.fatal("Refusing to start: {}", problem));
+        LogManager.shutdown(); // Flush any async logs
+        // A configuration error stays until the operator fixes it: no automatic restart.
+        System.exit(LiteMustHaltException.EXIT_CODE);
+      }
       final var nodeBootStopwatch = Stopwatch.createStarted();
       final var radixNode = RadixNodeBootstrapper.runNewNode(properties);
       final var startupTime = nodeBootStopwatch.elapsed();
@@ -98,10 +133,27 @@ public final class RadixNodeApplication {
       radixNode.reportSelfStartupTime(startupTime);
       Runtime.getRuntime().addShutdownHook(new Thread(radixNode::shutdown, "Node-Shutdown"));
     } catch (Exception ex) {
+      final var halt = liteMustHaltCause(ex);
+      if (halt != null) {
+        // A lite validator found a condition which a restart would not fix (see the exception).
+        log.fatal(
+            "Refusing to start, and must not be restarted automatically: {}", halt.getMessage());
+        LogManager.shutdown(); // Flush any async logs
+        System.exit(LiteMustHaltException.EXIT_CODE);
+      }
       log.fatal("Unable to start", ex);
       LogManager.shutdown(); // Flush any async logs
       System.exit(-1);
     }
+  }
+
+  private static LiteMustHaltException liteMustHaltCause(Throwable throwable) {
+    for (var cause = throwable; cause != null; cause = cause.getCause()) {
+      if (cause instanceof LiteMustHaltException halt) {
+        return halt;
+      }
+    }
+    return null;
   }
 
   private static void logVersion() {

@@ -64,6 +64,8 @@
 
 package com.radixdlt.consensus.liveness;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.base.Stopwatch;
 import com.radixdlt.consensus.*;
 import com.radixdlt.consensus.bft.*;
@@ -105,6 +107,7 @@ public final class Pacemaker implements BFTEventProcessorAtCurrentRound {
   private final PacemakerTimeoutCalculator timeoutCalculator;
   private final ProposalGenerator proposalGenerator;
   private final UserTransactionMoratoriumProvider userTransactionMoratoriumProvider;
+  private final VoteWithholding voteWithholding;
   private final Hasher hasher;
   private final RemoteEventDispatcher<BFTValidatorId, Proposal> proposalDispatcher;
   private final RemoteEventDispatcher<BFTValidatorId, Vote> voteDispatcher;
@@ -146,6 +149,45 @@ public final class Pacemaker implements BFTEventProcessorAtCurrentRound {
       TimeSupplier timeSupplier,
       RoundUpdate initialRoundUpdate,
       Metrics metrics) {
+    this(
+        self,
+        validatorSet,
+        vertexStore,
+        safetyRules,
+        timeoutDispatcher,
+        scheduledLocalTimeoutDispatcher,
+        timeoutCalculator,
+        proposalGenerator,
+        userTransactionMoratoriumProvider,
+        VoteWithholding.NONE,
+        proposalDispatcher,
+        voteDispatcher,
+        noVoteDispatcher,
+        hasher,
+        timeSupplier,
+        initialRoundUpdate,
+        metrics);
+  }
+
+  public Pacemaker(
+      BFTValidatorId self,
+      BFTValidatorSet validatorSet,
+      VertexStoreAdapter vertexStore,
+      SafetyRules safetyRules,
+      EventDispatcher<LocalTimeoutOccurrence> timeoutDispatcher,
+      ScheduledEventDispatcher<ScheduledLocalTimeout> scheduledLocalTimeoutDispatcher,
+      PacemakerTimeoutCalculator timeoutCalculator,
+      ProposalGenerator proposalGenerator,
+      UserTransactionMoratoriumProvider userTransactionMoratoriumProvider,
+      VoteWithholding voteWithholding,
+      RemoteEventDispatcher<BFTValidatorId, Proposal> proposalDispatcher,
+      RemoteEventDispatcher<BFTValidatorId, Vote> voteDispatcher,
+      EventDispatcher<NoVote> noVoteDispatcher,
+      Hasher hasher,
+      TimeSupplier timeSupplier,
+      RoundUpdate initialRoundUpdate,
+      Metrics metrics) {
+    this.voteWithholding = Objects.requireNonNull(voteWithholding);
     this.self = Objects.requireNonNull(self);
     this.validatorSet = Objects.requireNonNull(validatorSet);
     this.vertexStore = Objects.requireNonNull(vertexStore);
@@ -274,7 +316,8 @@ public final class Pacemaker implements BFTEventProcessorAtCurrentRound {
   }
 
   private void attemptVoteOnVertex(ExecutedVertex executedVertex) {
-    if (isVoteWithheldByUserTransactionMoratorium(executedVertex)) {
+    if (this.voteWithholding.withholdsVotesIn(executedVertex.vertex().getEpoch())
+        || isVoteWithheldByUserTransactionMoratorium(executedVertex)) {
       this.noVoteDispatcher.dispatch(new NoVote(executedVertex.getVertexWithHash()));
       return;
     }

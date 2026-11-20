@@ -1,3 +1,4 @@
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
 /* Copyright 2021 Radix Publishing Ltd incorporated in Jersey (Channel Islands).
  *
  * Licensed under the Radix License, Version 1.0 (the "License"); you may not use this
@@ -91,6 +92,34 @@ startScripts {
     }
 }
 
+
+// Lite validator: a start script of its own, so that the lite package can only ever start
+// `LiteValidatorApplication` (which refuses anything but a lite configuration).
+// The native library is expected next to the jars, in `lib/native` (see
+// docs/lite-validator/ops/build-lite-package.sh).
+task liteStartScripts(type: CreateStartScripts) {
+    mainClass = 'com.radixdlt.lite.LiteValidatorApplication'
+    applicationName = 'lite-validator'
+    outputDir = file("$buildDir/liteScripts")
+    classpath = files('src/resources') + startScripts.classpath
+    defaultJvmOpts = ["--enable-preview"]
+    doLast {
+        def unixScriptFile = file getUnixScript()
+        def text = unixScriptFile.text
+        text = text.replace('$APP_HOME/lib/resources', '$RADIXDLT_HOME')
+        // Appended after the user's JAVA_OPTS, so that the library of this package always wins.
+        // A cap on glibc's per-thread malloc arenas: without it, the process grows by gigabytes of
+        // arena memory which is never given back (measured: 3.1 GB instead of 2.2 GB after hours).
+        def marker = "DEFAULT_JVM_OPTS="
+        assert text.count(marker) == 1
+        text = text.replace(marker,
+            'LITE_VALIDATOR_OPTS="$LITE_VALIDATOR_OPTS -Djava.library.path=$APP_HOME/lib/native"\n' +
+            ': "${MALLOC_ARENA_MAX:=2}"\n' +
+            'export MALLOC_ARENA_MAX\n\n' + marker)
+        unixScriptFile.text = text
+        delete getWindowsScript()
+    }
+}
 
 sourceSets {
     testcore {

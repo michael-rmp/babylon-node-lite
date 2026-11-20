@@ -64,9 +64,13 @@
 
 package com.radixdlt.ledger;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Streams;
+import com.google.common.hash.HashCode;
 import com.google.inject.Inject;
 import com.radixdlt.consensus.*;
 import com.radixdlt.consensus.bft.*;
@@ -86,6 +90,8 @@ import com.radixdlt.transactions.RawLedgerTransaction;
 import com.radixdlt.transactions.RawNotarizedTransaction;
 import com.radixdlt.utils.TimeSupplier;
 import java.util.*;
+import java.util.function.LongFunction;
+import java.util.function.LongSupplier;
 import javax.annotation.Nullable;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -171,6 +177,9 @@ public final class StateComputerLedger implements Ledger, ProposalGenerator {
   private final TimeSupplier timeSupplier;
   private final Object commitAndAdvanceLedgerLock;
   private LedgerProofBundle latestProof;
+  // Lite validator only (empty for a regular node): consensus commits which the ledger database,
+  // written by another node, does not show yet. Set once, right after construction.
+  private Optional<PendingConsensusCommits> pendingConsensusCommits;
 
   @Inject
   public StateComputerLedger(
@@ -179,6 +188,31 @@ public final class StateComputerLedger implements Ledger, ProposalGenerator {
       StateComputer stateComputer,
       Hasher hasher,
       Metrics metrics) {
+    this(timeSupplier, initialLatestProof, stateComputer, hasher, metrics, Optional.empty());
+  }
+
+  /**
+   * Lite validator: injected only where {@link PendingConsensusCommits} is bound (by the lite
+   * validator's modules); a regular node, and every setup without that binding, never gets it.
+   */
+  @Inject(optional = true)
+  void setPendingConsensusCommits(PendingConsensusCommits pendingConsensusCommits) {
+    this.pendingConsensusCommits = Optional.of(pendingConsensusCommits);
+  }
+
+  /** Whether this ledger holds back consensus commits (only in a lite validator). */
+  public boolean holdsBackConsensusCommits() {
+    return this.pendingConsensusCommits.isPresent();
+  }
+
+  public StateComputerLedger(
+      TimeSupplier timeSupplier,
+      LedgerProofBundle initialLatestProof,
+      StateComputer stateComputer,
+      Hasher hasher,
+      Metrics metrics,
+      Optional<PendingConsensusCommits> pendingConsensusCommits) {
+    this.pendingConsensusCommits = Objects.requireNonNull(pendingConsensusCommits);
     this.timeSupplier = Objects.requireNonNull(timeSupplier);
     this.stateComputer = Objects.requireNonNull(stateComputer);
     this.hasher = Objects.requireNonNull(hasher);
@@ -198,8 +232,12 @@ public final class StateComputerLedger implements Ledger, ProposalGenerator {
   @Override
   public List<RawNotarizedTransaction> getTransactionsForProposal(
       Round round, List<ExecutedVertex> prepared) {
+    // A lite validator's pending consensus commits are not in the database yet, so their
+    // transactions are still in the mempool: exclude them as well.
+    final var pending =
+        this.pendingConsensusCommits.map(PendingConsensusCommits::pending).orElse(List.of());
     final ImmutableList<ExecutedTransaction> executedTransactions =
-        prepared.stream()
+        Streams.concat(pending.stream(), prepared.stream())
             .flatMap(ExecutedVertex::successfulTransactions)
             .collect(ImmutableList.toImmutableList());
     return stateComputer.getTransactionsForProposal(executedTransactions);
@@ -211,13 +249,56 @@ public final class StateComputerLedger implements Ledger, ProposalGenerator {
     return metrics.ledger().prepare().measure(() -> this.prepareInternal(previous, vertexWithHash));
   }
 
+  /**
+   * Lite validator: the ancestors of the given vertex among the pending consensus commits and the
+   * given path from the vertex store's root, oldest first. The two may overlap, and the pending
+   * vertices may even be descendants of the root: the vertex store can be rebuilt (BFT sync) on a
+   * root older than the last own commit. So the ancestors are found by following the parent links
+   * back from the vertex's parent; each appears exactly once, in chain order. The walk stops where
+   * a link is missing (at the root, or at what the database already shows); the regular checks in
+   * {@link #prepareInternal} then decide whether the rest can be executed.
+   */
+  private static List<ExecutedVertex> liteAncestorChain(
+      List<ExecutedVertex> pending, List<ExecutedVertex> previous, Vertex vertex) {
+    final var byHash = new HashMap<HashCode, ExecutedVertex>();
+    for (var candidate : Iterables.concat(pending, previous)) {
+      byHash.putIfAbsent(candidate.getVertexHash(), candidate);
+    }
+    final var ancestors = new ArrayList<ExecutedVertex>();
+    var cursor = vertex.getParentVertexId();
+    while (true) {
+      final var ancestor = byHash.remove(cursor);
+      if (ancestor == null) {
+        break;
+      }
+      ancestors.add(ancestor);
+      cursor = ancestor.vertex().getParentVertexId();
+    }
+    Collections.reverse(ancestors);
+    return ancestors;
+  }
+
   private Optional<ExecutedVertex> prepareInternal(
-      LinkedList<ExecutedVertex> previousVertices, VertexWithHash vertexWithHash) {
+      LinkedList<ExecutedVertex> previous, VertexWithHash vertexWithHash) {
     final var vertex = vertexWithHash.vertex();
     final LedgerHeader parentHeader = vertex.getParentHeader().getLedgerHeader();
 
     final StateComputerPrepareResult result;
     synchronized (this.commitAndAdvanceLedgerLock) {
+      // A lite validator executes on top of its consensus commits which the database does not
+      // show yet (they come before the given previous vertices, which start after the root):
+      final List<ExecutedVertex> previousVertices;
+      if (this.pendingConsensusCommits.isPresent()) {
+        final var pending = this.pendingConsensusCommits.get();
+        if (pending.blocksPreparing()) {
+          this.metrics.ledger().litePreparesWithheld().inc();
+          return Optional.empty();
+        }
+        previousVertices = liteAncestorChain(pending.pending(), previous, vertex);
+      } else {
+        previousVertices = previous;
+      }
+
       final var latestStateVersion = this.latestProof.resultantStateVersion();
       final var latestLedgerHashes =
           REv2ToConsensus.ledgerHashes(this.latestProof.primaryProof().ledgerHeader().hashes());
@@ -315,13 +396,27 @@ public final class StateComputerLedger implements Ledger, ProposalGenerator {
           processedQcCommit -> {
             switch (processedQcCommit) {
               case ProcessedQcCommit.OfConensusQc ofConensusQc -> {
-                final var ledgerExtension =
-                    new LedgerExtension(transactions, ofConensusQc.ledgerProof());
-                metrics
-                    .ledger()
-                    .commit()
-                    .measure(
-                        () -> this.commit(ledgerExtension, committedUpdate.vertexStoreState()));
+                if (this.pendingConsensusCommits.isPresent()) {
+                  // A lite validator writes nothing: the commit waits until the database
+                  // shows it.
+                  synchronized (this.commitAndAdvanceLedgerLock) {
+                    final var pending = this.pendingConsensusCommits.get();
+                    pending.add(committedUpdate.committed());
+                    pending.verifyAndRemoveUpTo(this.latestProof.resultantStateVersion());
+                    this.metrics
+                        .ledger()
+                        .liteConsensusCommitsPending()
+                        .set(pending.pending().size());
+                  }
+                } else {
+                  final var ledgerExtension =
+                      new LedgerExtension(transactions, ofConensusQc.ledgerProof());
+                  metrics
+                      .ledger()
+                      .commit()
+                      .measure(
+                          () -> this.commit(ledgerExtension, committedUpdate.vertexStoreState()));
+                }
               }
               case ProcessedQcCommit.OfInitialEpochQc ofInitialEpochQc -> {
                 // no-op, ignore
@@ -353,6 +448,53 @@ public final class StateComputerLedger implements Ledger, ProposalGenerator {
         .committedVertices()
         .label(new Metrics.Bft.CommittedVertex(false))
         .inc(numCommittedNonFallbackVertices);
+  }
+
+  /**
+   * Lite validator: advances this ledger to the state of a ledger database written by another node.
+   *
+   * <p>Everything happens under the same lock as {@link #prepare} and the regular commit, so a
+   * {@code prepare} sees either the state before or after, never a moving one:
+   *
+   * <ol>
+   *   <li>{@code catchUp} moves the database view forward and returns its top state version;
+   *   <li>while this ledger is behind it, {@code readExtension} is asked for an extension starting
+   *       right after the given state version, which is then handed to the {@link StateComputer}
+   *       like a synced one.
+   * </ol>
+   *
+   * <p>Exceptions thrown by the given functions propagate; this ledger then remains at the last
+   * extension which was applied.
+   *
+   * @return the number of transactions by which this ledger advanced
+   */
+  public int advanceToExternalLedger(
+      LongSupplier catchUp, LongFunction<LedgerExtension> readExtension) {
+    int transactionCount = 0;
+    synchronized (this.commitAndAdvanceLedgerLock) {
+      final var topStateVersion = catchUp.getAsLong();
+      while (this.latestProof.resultantStateVersion() < topStateVersion) {
+        final var latestStateVersion = this.latestProof.resultantStateVersion();
+        final var extension = readExtension.apply(latestStateVersion);
+        if (extension.proof().stateVersion() <= latestStateVersion) {
+          throw new IllegalStateException(
+              "External ledger extension %s does not progress the current ledger %s"
+                  .formatted(extension.proof(), this.latestProof));
+        }
+        final var extensionToApply = extension.getExtensionFrom(latestStateVersion);
+        this.latestProof = this.stateComputer.commit(extensionToApply, null);
+        transactionCount += extensionToApply.transactions().size();
+      }
+      final var latestStateVersion = this.latestProof.resultantStateVersion();
+      this.pendingConsensusCommits.ifPresent(
+          pending -> {
+            pending.verifyAndRemoveUpTo(latestStateVersion);
+            this.metrics.ledger().liteConsensusCommitsPending().set(pending.pending().size());
+          });
+    }
+    this.metrics.ledger().stateVersion().set(this.latestProof.resultantStateVersion());
+    this.metrics.ledger().syncTransactionsProcessed().inc(transactionCount);
+    return transactionCount;
   }
 
   public EventProcessor<LedgerExtension> syncEventProcessor() {

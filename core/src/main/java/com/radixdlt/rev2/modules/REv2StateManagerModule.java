@@ -64,6 +64,8 @@
 
 package com.radixdlt.rev2.modules;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.inject.*;
 import com.google.inject.multibindings.OptionalBinder;
 import com.google.inject.multibindings.ProvidesIntoSet;
@@ -224,31 +226,34 @@ public final class REv2StateManagerModule extends AbstractModule {
 
           @Provides
           @Singleton
-          private NodeRustEnvironment stateManager(
-              MempoolRelayDispatcher<RawNotarizedTransaction> mempoolRelayDispatcher,
-              FatalPanicHandler fatalPanicHandler,
+          StateManagerConfig stateManagerConfig(
               Network network,
               @NodeStorageLocation DatabaseBackendConfig nodeDatabaseBackendConfig,
               DatabaseConfig databaseConfig,
-              // Injection lets restart tests replace the protocol configuration.
               ProtocolConfig protocolConfig) {
+            return new StateManagerConfig(
+                NetworkDefinition.from(network),
+                mempoolConfig,
+                vertexLimitsConfigOpt,
+                nodeDatabaseBackendConfig,
+                databaseConfig,
+                getLoggingConfig(),
+                stateTreeGcConfig,
+                ledgerProofsGcConfig,
+                ledgerSyncLimitsConfig,
+                protocolConfig,
+                noFees,
+                scenariosExecutionConfig);
+          }
+
+          @Provides
+          @Singleton
+          private NodeRustEnvironment stateManager(
+              MempoolRelayDispatcher<RawNotarizedTransaction> mempoolRelayDispatcher,
+              FatalPanicHandler fatalPanicHandler,
+              StateManagerConfig stateManagerConfig) {
             return new NodeRustEnvironment(
-                genesisProvider,
-                mempoolRelayDispatcher,
-                fatalPanicHandler,
-                new StateManagerConfig(
-                    NetworkDefinition.from(network),
-                    mempoolConfig,
-                    vertexLimitsConfigOpt,
-                    nodeDatabaseBackendConfig,
-                    databaseConfig,
-                    getLoggingConfig(),
-                    stateTreeGcConfig,
-                    ledgerProofsGcConfig,
-                    ledgerSyncLimitsConfig,
-                    protocolConfig,
-                    noFees,
-                    scenariosExecutionConfig));
+                genesisProvider, mempoolRelayDispatcher, fatalPanicHandler, stateManagerConfig);
           }
 
           @Provides

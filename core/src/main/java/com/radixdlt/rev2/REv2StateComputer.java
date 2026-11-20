@@ -64,6 +64,8 @@
 
 package com.radixdlt.rev2;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import static com.radixdlt.lang.Option.none;
 
 import com.radixdlt.consensus.BFTConfiguration;
@@ -102,7 +104,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /** REv2 State Computer implementation */
-public final class REv2StateComputer implements StateComputerLedger.StateComputer {
+public class REv2StateComputer implements StateComputerLedger.StateComputer {
   private static final Logger log = LogManager.getLogger();
 
   private final RustStateComputer stateComputer;
@@ -288,10 +290,12 @@ public final class REv2StateComputer implements StateComputerLedger.StateCompute
         ledgerHashes);
   }
 
-  @Override
-  public LedgerProofBundle commit(LedgerExtension ledgerExtension, VertexStoreState vertexStore) {
-    final var proof = ledgerExtension.proof();
-
+  /**
+   * Writes the given extension (and vertex store, if non-null) to the ledger database.
+   *
+   * <p>A lite validator overrides this, since its ledger is written by another node.
+   */
+  protected CommitSummary persist(LedgerExtension ledgerExtension, VertexStoreState vertexStore) {
     final Option<byte[]> vertexStoreBytes;
     if (vertexStore != null) {
       vertexStoreBytes =
@@ -302,16 +306,35 @@ public final class REv2StateComputer implements StateComputerLedger.StateCompute
 
     var commitRequest =
         new CommitRequest(
-            ledgerExtension.transactions(), proof, vertexStoreBytes, Option.from(selfValidatorId));
+            ledgerExtension.transactions(),
+            ledgerExtension.proof(),
+            vertexStoreBytes,
+            Option.from(selfValidatorId));
 
     final var result = stateComputer.commit(commitRequest);
-    final var commitSummary =
-        result
-            .onError(
-                error -> {
-                  throw new InvalidCommitRequestException(error);
-                })
-            .unwrap();
+    return result
+        .onError(
+            error -> {
+              throw new InvalidCommitRequestException(error);
+            })
+        .unwrap();
+  }
+
+  /**
+   * Executes the protocol update which the just-committed proof has triggered, and returns the
+   * resulting proof.
+   *
+   * <p>A lite validator overrides this, since it does not execute protocol updates.
+   */
+  protected LedgerProof applyKnownPendingProtocolUpdate() {
+    return this.rustProtocolUpdate.applyKnownPendingProtocolUpdate().postUpdateProof();
+  }
+
+  @Override
+  public LedgerProofBundle commit(LedgerExtension ledgerExtension, VertexStoreState vertexStore) {
+    final var proof = ledgerExtension.proof();
+
+    final var commitSummary = persist(ledgerExtension, vertexStore);
 
     // Prepare to update the latestProof bundle
     var newLatestProof = proof;
@@ -335,8 +358,7 @@ public final class REv2StateComputer implements StateComputerLedger.StateCompute
     }
     if (newHeader.nextProtocolVersion().isPresent()) {
       latestProofWhichInitiatedOneOrMoreProtocolUpdates = Option.some(newLatestProof);
-      final var finalExecutionProof =
-          this.rustProtocolUpdate.applyKnownPendingProtocolUpdate().postUpdateProof();
+      final var finalExecutionProof = applyKnownPendingProtocolUpdate();
       newLatestProof = finalExecutionProof;
       latestProtocolUpdateExecutionProof = Option.some(finalExecutionProof);
     }

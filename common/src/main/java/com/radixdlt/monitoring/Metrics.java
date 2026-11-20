@@ -64,6 +64,8 @@
 
 package com.radixdlt.monitoring;
 
+// Modified in 2026 by michael-rmp for the lite validator (babylon-node-lite), see NOTICE.
+
 import com.google.common.base.Preconditions;
 import com.google.common.hash.HashCode;
 import io.prometheus.client.Counter;
@@ -252,7 +254,12 @@ public record Metrics(
       Counter bftTransactionsProcessed,
       Timer commit,
       Timer prepare,
-      Counter ignoredBftCommittedUpdates) {}
+      Counter ignoredBftCommittedUpdates,
+      // Lite validator only: consensus commits which the ledger database does not show yet, and
+      // vertices not executed (so not voted for) because of them or of the start epoch.
+      Gauge liteConsensusCommitsPending,
+      Counter litePreparesWithheld,
+      Counter liteVotesWithheld) {}
 
   public record LedgerSync(
       Counter validResponsesReceived,
