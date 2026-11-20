@@ -1,4 +1,24 @@
-# Radix Babylon Node
+# Radix Babylon Node with lite validator (babylon-node-lite)
+
+This repository is a derivative of the [Radix Babylon node](https://github.com/radixdlt/babylon-node)
+(release `v1.4.0.0`). It adds a **lite validator**: a further validator on the same host as an
+existing node that reads the node's state database read-only instead of keeping a ledger of its
+own. **Start here: [docs/lite-validator/README.md](docs/lite-validator/README.md).**
+
+- Experimental. Not affiliated with, endorsed by or supported by RDX Works or the Radix Foundation.
+- The standard node in this repository is unchanged in behaviour; run your validator with the
+  official release. Only the lite validator package (`docs/lite-validator/ops/`) is meant to be
+  built from here.
+- Changes against the upstream release: `git diff v1.4.0.0`; modified upstream files: [NOTICE](NOTICE).
+- License: [Radix License, Version 1.0](LICENSE), as the upstream project.
+- Questions and bugs: GitHub issues. Security: [SECURITY.md](SECURITY.md).
+- Developed with the assistance of Claude (Anthropic).
+
+The rest of this file is the upstream README.
+
+---
+
+## Radix Babylon Node (upstream README)
 
 This is the repository for the RadixDLT node, for the Babylon release and beyond.
 
