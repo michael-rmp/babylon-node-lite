@@ -1,0 +1,5 @@
+# db.location of the validator (the directory that contains state_manager). While this is
+# empty, the watchdog stops all lite validators.
+DB_PATH=
+# Stop all lite validators when less than this is free on the file system of DB_PATH.
+MIN_FREE_GB=150

@@ -1,0 +1,6 @@
+[Unit]
+Description=Watchdog for lite validator processes (disk space)
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/radix-lite-watchdog
+ExecStart=/usr/local/sbin/radix-lite-watchdog.sh

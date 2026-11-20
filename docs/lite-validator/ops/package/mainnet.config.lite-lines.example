@@ -1,0 +1,43 @@
+# Lines that a lite validator needs in its mainnet.config in addition to, or different from, the
+# validator's mainnet.config. LITE_DIR = the lite validator's own directory (outside of the top
+# directory of the validator's db.location, not in a home directory). NODE_DB = db.location of the
+# validator. All settings: docs/lite-validator/CONFIGURATION.md
+
+# Own key and own data directory (install.sh checks both):
+node.key.path=LITE_DIR/keystore.ks
+db.location=LITE_DIR/data
+
+# The state database of the validator; only read. This line makes the node a lite validator.
+lite.primary_state_manager_path=NODE_DB/state_manager
+
+# Own ports (the validator uses 30000 and 3333-3336). Mandatory: the start is refused with a
+# default port (exit 78), also when a line is missing, because a lite validator that starts first
+# could otherwise take the validator's ports.
+network.p2p.listen_port=30001
+network.p2p.broadcast_port=30001
+api.core.port=3343
+api.system.port=3344
+api.prometheus.port=3345
+api.engine_state.port=3346
+# api.core.bind_address and api.engine_state.bind_address must be IP addresses (e.g. 127.0.0.1),
+# not "localhost": these APIs are served by Rust, which takes only IP addresses.
+
+# Taking part in consensus (after a first run as a follower only, see INSTALL.md step 6). Without
+# consensus.validator_address the lite validator only follows. Remove the validator's own
+# consensus.validator_address from the copied file. consensus.use_genesis_for_validator_address
+# is refused.
+# consensus.validator_address=validator_rdx1...        (the lite validator's own, registered address)
+# lite.primary_validator_address=validator_rdx1...     (the address of the validator whose database is read)
+
+# Optional; these are the defaults:
+# lite.max_open_files=500
+# lite.block_cache_mb=256
+# lite.cache_index_and_filter_blocks=false
+# lite.wal_links=true
+# lite.check_interval_ms=50
+# lite.min_follow_interval_ms=500
+# lite.follow_interval_ms=1000
+# lite.gate_retries=20
+# lite.max_consecutive_failures=30
+# lite.max_pending_committed=50
+# lite.malloc_trim_interval_s=300

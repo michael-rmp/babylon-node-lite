@@ -1,0 +1,11 @@
+# Lite validator next to a local development node (./gradlew :core:run), for development only.
+# LOCAL_DIR = a directory of your own; the state database of the local node is mounted read-only
+# at LOCAL_DIR/primary/state_manager (see docs/lite-validator/DEVELOPMENT.md).
+db.location=LOCAL_DIR/db
+lite.primary_state_manager_path=LOCAL_DIR/primary/state_manager
+network.p2p.listen_port=30001
+network.p2p.seed_nodes=radix://node_loc1q0llj774w40wafpqg5apgd2jxhfc9aj897zk3gvt9uzh59rq9964vp9cx0t@127.0.0.1:30000
+api.core.port=3343
+api.system.port=3344
+api.prometheus.port=3345
+api.engine_state.port=3346
