@@ -96,7 +96,7 @@ Rules that follow from it:
 
 | Document | Content |
 |---|---|
-| [INSTALL.md](INSTALL.md) | Requirements, building the package, installing, first start, update, removal |
+| [INSTALL.md](INSTALL.md) | [All steps at a glance](INSTALL.md#all-steps-at-a-glance) (copy and paste); requirements, building the package, installing, first start, update, removal |
 | [CONFIGURATION.md](CONFIGURATION.md) | All settings, ports, exit codes |
 | [OPERATIONS.md](OPERATIONS.md) | Monitoring, memory, maintenance, key changes, protocol updates, troubleshooting |
 | [TESTING.md](TESTING.md) | What was tested and how: local networks, misconfigurations, memory |

@@ -13,6 +13,140 @@ Throughout this guide:
 The systemd unit is called `lite-<name of LITE_DIR>.service`, e.g. `lite-lite-1.service` for
 `/opt/lite-1`.
 
+## All steps at a glance
+
+Every command in order, to copy and paste. The numbered sections below explain each step; read
+them once before the first installation. Check the requirements (section 1) first, and stop at
+any error: nothing of your validator is changed by these steps, and stopping is always safe.
+
+**On the build machine** (not the validator host; see section 2):
+
+```bash
+git clone https://github.com/michael-rmp/babylon-node-lite.git
+cd babylon-node-lite
+docs/lite-validator/ops/build-lite-package.sh ../release
+# copy ../release/lite-validator-*.tar.gz and its .sha256 to the validator host
+```
+
+**On the validator host**, in one shell session, in the directory with the two copied files.
+
+0\. Variables: adapt these lines, everything below uses them.
+
+```bash
+NODE_DB=/srv/radixdlt/data                        # db.location of your validator (contains state_manager)
+NODE_CONFIG=/etc/radixdlt/node/default.config     # configuration file of your validator
+LITE_DIR=/opt/lite-1                              # directory of the lite validator
+VERSION=1.4.0.0-lite.0123456789                   # from the name of the package file
+PKG=$LITE_DIR/lite-validator-$VERSION
+UNIT=lite-$(basename "$LITE_DIR").service
+```
+
+1\. Check the package, create the user, unpack (section 3):
+
+```bash
+sha256sum -c lite-validator-$VERSION.tar.gz.sha256
+id lite >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin lite
+sudo mkdir -p "$LITE_DIR"
+sudo tar -C "$LITE_DIR" -xzf lite-validator-$VERSION.tar.gz
+```
+
+2\. Key and `environment` (section 3). Choose a password without spaces, quotes or backslashes,
+and keep it (and later a copy of `keystore.ks`) in a safe place:
+
+```bash
+read -rs PW
+sudo "$PKG/bin/keygen" --keystore="$LITE_DIR/keystore.ks" --password="$PW"
+sudo install -m 600 /dev/null "$LITE_DIR/environment"
+printf 'RADIX_NODE_KEYSTORE_PASSWORD=%s\nJAVA_OPTS=-Xms256m -Xmx512m -XX:MaxDirectMemorySize=1g\n' "$PW" \
+  | sudo tee "$LITE_DIR/environment" >/dev/null
+unset PW
+```
+
+`keygen` prints the public key of the lite validator; you need it to register the validator
+(step 7).
+
+3\. `mainnet.config` from a copy of your validator's configuration (section 3): the lines that
+must differ are removed and appended anew. Without a configuration to copy (e.g. a node in
+Docker), use `$PKG/mainnet.config.example` instead.
+
+```bash
+sudo cp "$NODE_CONFIG" "$LITE_DIR/mainnet.config"
+sudo sed -i -E '/^[[:space:]]*(node\.key\.[a-z_]+|db\.location|db\.checkpoints_path|consensus\.(validator_address|use_genesis_for_validator_address)|lite\.[a-z_]+|network\.p2p\.(listen_port|broadcast_port)|api\.(core|system|prometheus|engine_state)\.(port|bind_address)|api\.system\.enable_db_checkpoint)[[:space:]]*=/d' "$LITE_DIR/mainnet.config"
+sudo tee -a "$LITE_DIR/mainnet.config" >/dev/null <<EOF
+
+# lite validator
+node.key.path=$LITE_DIR/keystore.ks
+db.location=$LITE_DIR/data
+lite.primary_state_manager_path=$NODE_DB/state_manager
+network.p2p.listen_port=30001
+network.p2p.broadcast_port=30001
+api.core.port=3343
+api.core.bind_address=127.0.0.1
+api.system.port=3344
+api.system.bind_address=127.0.0.1
+api.prometheus.port=3345
+api.prometheus.bind_address=127.0.0.1
+api.engine_state.port=3346
+api.engine_state.bind_address=127.0.0.1
+EOF
+sudo grep -nE '^(node\.key|db\.|lite\.|consensus\.|network\.p2p\.(listen|broadcast)|api\.)' "$LITE_DIR/mainnet.config"
+```
+
+The last command shows the result: your validator's key path, database and
+`consensus.validator_address` must not appear any more.
+
+4\. Check and write the systemd service (section 4). `install.sh` changes nothing if a check
+fails:
+
+```bash
+sudo MEMORY_MAX=4G "$PKG/install.sh"
+systemctl cat "$UNIT"
+```
+
+5\. Disk watchdog, once per host (section 4):
+
+```bash
+sudo install -m 755 "$PKG/watchdog/radix-lite-watchdog.sh" /usr/local/sbin/
+sudo install -m 644 "$PKG/watchdog/radix-lite-watchdog.service" "$PKG/watchdog/radix-lite-watchdog.timer" /etc/systemd/system/
+printf 'DB_PATH=%s\nMIN_FREE_GB=150\n' "$NODE_DB" | sudo tee /etc/default/radix-lite-watchdog >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now radix-lite-watchdog.timer
+```
+
+6\. First start, as a follower only (section 5). Opening the database takes a few minutes:
+
+```bash
+sudo systemctl start "$UNIT"
+sudo journalctl -u "$UNIT" -f                     # Ctrl+C to leave; wait for the node to be UP
+curl -s localhost:3344/system/health              # lite validator: "status":"UP"
+curl -s localhost:3334/system/health              # validator: "missed_count" must not rise
+for p in 3335 3345; do curl -s localhost:$p/prometheus/metrics | grep '^rn_ledger_state_version '; done
+```
+
+Let it run for a while (a few epoch changes) and watch memory and journal
+([OPERATIONS.md](OPERATIONS.md)).
+
+7\. Taking part in consensus (section 6). First, as the operator, register a validator on ledger
+with the public key from step 2 and note its address. Then:
+
+```bash
+LITE_VALIDATOR=validator_rdx1...                  # the new validator (lite validator)
+NODE_VALIDATOR=validator_rdx1...                  # your existing validator
+sudo sed -i -E '/^[[:space:]]*(consensus\.validator_address|lite\.primary_validator_address)[[:space:]]*=/d' "$LITE_DIR/mainnet.config"
+printf 'consensus.validator_address=%s\nlite.primary_validator_address=%s\n' "$LITE_VALIDATOR" "$NODE_VALIDATOR" \
+  | sudo tee -a "$LITE_DIR/mainnet.config" >/dev/null
+sudo "$PKG/install.sh"
+sudo systemctl restart "$UNIT"
+```
+
+8\. Once it runs well, start it at boot (after your node):
+
+```bash
+sudo systemctl enable "$UNIT"
+```
+
+Stop at any time: `sudo systemctl stop "$UNIT"`. Updates, the way back and removal: sections 7 and 8.
+
 ## 1. Requirements
 
 **Who does what.** Most steps can be done by an operator or by an assistant (for example a coding

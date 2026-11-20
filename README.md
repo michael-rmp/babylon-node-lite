@@ -56,14 +56,18 @@ may occasionally miss a proposal. See [limits](docs/lite-validator/README.md#lim
 ## Getting started
 
 1. Read the [overview](docs/lite-validator/README.md).
-2. Build the package and install it: [INSTALL.md](docs/lite-validator/INSTALL.md) (build machine
-   with 16 GB RAM, then about an hour on the validator host).
+2. Follow **[all installation steps at a glance](docs/lite-validator/INSTALL.md#all-steps-at-a-glance)**:
+   every command in order, to copy and paste: build the package, create the user, create the key
+   with `keygen`, write `environment` and `mainnet.config`, create the systemd service and the
+   disk watchdog, start, register. Each step is explained in detail further down in
+   [INSTALL.md](docs/lite-validator/INSTALL.md). You need a build machine with 16 GB RAM, then
+   about an hour on the validator host.
 3. Run it as a follower first, then register it as a validator.
 
 | Documentation | |
 |---|---|
 | [Overview](docs/lite-validator/README.md) | what it is, how it works, safety, limits |
-| [Installation](docs/lite-validator/INSTALL.md) | requirements, build, install, first start, update |
+| [Installation](docs/lite-validator/INSTALL.md) | all steps at a glance; requirements, build, install, first start, update |
 | [Configuration](docs/lite-validator/CONFIGURATION.md) | all settings, ports, exit codes |
 | [Operations](docs/lite-validator/OPERATIONS.md) | monitoring, memory, maintenance, troubleshooting |
 | [Testing](docs/lite-validator/TESTING.md) | what was tested and how |
