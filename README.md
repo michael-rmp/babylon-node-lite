@@ -1,139 +1,78 @@
-# Radix Babylon Node with lite validator (babylon-node-lite)
+# babylon-node-lite
 
-This repository is a derivative of the [Radix Babylon node](https://github.com/radixdlt/babylon-node)
-(release `v1.4.0.0`). It adds a **lite validator**: a further validator on the same host as an
-existing node that reads the node's state database read-only instead of keeping a ledger of its
-own. **Start here: [docs/lite-validator/README.md](docs/lite-validator/README.md).**
+**Run additional Radix validators on the server of your existing node, without a second copy of
+the ledger.**
 
-- Experimental. Not affiliated with, endorsed by or supported by RDX Works or the Radix Foundation.
-- The standard node in this repository is unchanged in behaviour; run your validator with the
-  official release. Only the lite validator package (`docs/lite-validator/ops/`) is meant to be
-  built from here.
-- Changes against the upstream release: `git diff v1.4.0.0`; modified upstream files: [NOTICE](NOTICE).
-- License: [Radix License, Version 1.0](LICENSE), as the upstream project.
-- Questions and bugs: GitHub issues. Security: [SECURITY.md](SECURITY.md).
+A second Radix validator normally means a second full node: another ~630 GB ledger (and growing),
+another disk, another sync, usually another server. A **lite validator** shares the ledger of the
+node you already run. It needs ~3.5 GB of RAM and a few GB of disk.
+
+```
+ one server
+┌──────────────────────────────────────────────────────────────┐
+│  your node (official release, unchanged)                     │
+│  ├─ validator A                                              │
+│  └─ ledger database (~630 GB) ◄──── read-only ──┐            │
+│                                                 │            │
+│  lite validator  ───────────────────────────────┘            │
+│  └─ validator B: own key, own address, own stake             │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## How it works
+
+- Your node keeps doing all the work of a node: it syncs, executes and stores the ledger.
+- The lite validator opens your node's database **read-only** and follows it every few hundred
+  milliseconds. It has its own key and its own validator address, and takes part in consensus
+  like any other validator: it proposes and votes.
+- It writes nothing into the ledger. A block that its consensus has committed counts only once
+  your node's database shows the same block.
+
+## Who it is for
+
+Operators of a Radix validator node on Linux (systemd) who want to run one or more further
+validators, without paying for a further node each time.
+
+## Is it safe for my validator?
+
+That is the first design goal. The lite validator runs as its own Linux user and sees only your
+node's state database, mounted read-only: the operating system itself refuses any write. On top of
+that it refuses to start on any configuration error, never uses your validator's key, and gets a
+hard memory limit, so that a lack of memory stops the lite validator, not your validator. Your node
+runs unchanged on the official release.
+Details: [safety of the validator's database](docs/lite-validator/README.md#safety-of-the-validators-database).
+
+## Status
+
+**Experimental.** Based on Babylon node `v1.4.0.0`. Tested in local networks and running on
+mainnet as a validator next to a standard validator since November 2026. Known limits: it is away
+for a few minutes at a protocol update, does not vote in the epoch in which it was started, and
+may occasionally miss a proposal. See [limits](docs/lite-validator/README.md#limits).
+
+## Getting started
+
+1. Read the [overview](docs/lite-validator/README.md).
+2. Build the package and install it: [INSTALL.md](docs/lite-validator/INSTALL.md) (build machine
+   with 16 GB RAM, then about an hour on the validator host).
+3. Run it as a follower first, then register it as a validator.
+
+| Documentation | |
+|---|---|
+| [Overview](docs/lite-validator/README.md) | what it is, how it works, safety, limits |
+| [Installation](docs/lite-validator/INSTALL.md) | requirements, build, install, first start, update |
+| [Configuration](docs/lite-validator/CONFIGURATION.md) | all settings, ports, exit codes |
+| [Operations](docs/lite-validator/OPERATIONS.md) | monitoring, memory, maintenance, troubleshooting |
+| [Testing](docs/lite-validator/TESTING.md) | what was tested and how |
+| [Development](docs/lite-validator/DEVELOPMENT.md) | code overview, building, tests |
+
+## About this repository
+
+- A derivative of the [Radix Babylon node](https://github.com/radixdlt/babylon-node), release
+  `v1.4.0.0`; everything the lite validator adds or changes is in the commits on top of that tag
+  (`git diff v1.4.0.0`, list of changed upstream files in [NOTICE](NOTICE)). The upstream README is
+  in [docs/UPSTREAM-README.md](docs/UPSTREAM-README.md).
+- Not affiliated with, endorsed by or supported by RDX Works or the Radix Foundation.
+- License: [Radix License, Version 1.0](LICENSE), as the upstream project. Provided as is, without
+  warranty; you are responsible for running it.
+- Questions and bugs: GitHub issues. Security issues: [SECURITY.md](SECURITY.md).
 - Developed with the assistance of Claude (Anthropic).
-
-The rest of this file is the upstream README.
-
----
-
-## Radix Babylon Node (upstream README)
-
-This is the repository for the RadixDLT node, for the Babylon release and beyond.
-
-## Integrators
-
-To run a node against our latest test environment, install docker and run `./testnet-node/run.sh`. See further [details on running a testnet node for development here](testnet-node/README.md).
-
-Also check out the [Babylon documentation for exchanges and integrators](https://docs.google.com/document/d/1cjc7_alyzIb2QQIGGn1PEpJyjrMRZYHq3VwkOXRP8J0).
-
-## Subdirectories
-
-Here we have:
-
-- [core](core): The core node, consensus and networking modules - written in Java. It includes a variant implementation of the [HotStuff](https://arxiv.org/abs/1803.05069) BFT-style consensus.
-- [core-rust-bridge](core-rust-bridge): A bridge between the Java core and the Rust `core-rust` - written in Java.
-  This will likely be merged into core at some point.
-- [core-rust](core-rust): Includes the Core API, and the "State Manager" which wraps the Babylon engine - this is written in Rust.
-  We pull in the Babylon engine from the [radixdlt-scrypto](https://github.com/radixdlt/radixdlt-scrypto) repository.
-- [cli-tools](cli-tools): Various basic command line helpers to assist with spinning up nodes and networks.
-- [common](common): Common Java utilities used by various modules. This will likely be merged into core
-  once the Olympia Engine has been removed.
-- [shell](shell): Examples for how to run Radix shell, which can enable spinning up temporary interactive
-   nodes. The Radix Shell code itself is in [cli-tools](cli-tools).
-- [docker](docker): An option for running a network of nodes locally. You can also use the "Run Single Validator" IntelliJ option.
-- [testnet-node](testnet-node): The easiest way to set up a development environment for integrators (check the [README](testnet-node/README.md))
-
-## Contribute
-
-Please follow our [Code of Conduct](CODE_OF_CONDUCT.md) in all your interactions with the project.
-See the [Contributing Guide](CONTRIBUTING.md) for more details on how to get involved.
-
-## Links
-
-| Link                                                            | Description                           |
-|-----------------------------------------------------------------|---------------------------------------|
-| [radixdlt.com](https://radixdlt.com/)                           | Radix DLT Homepage                    |                   
-| [docs-babylon.radixdlt.com](https://docs-babylon.radixdlt.com/) | Radix Babylon Technical Documentation |
-| [learn.radixdlt.com](https://learn.radixdlt.com/)               | Radix Knowledge Base                  |
-| [discord invite](https://discord.com/invite/WkB2USt)            | Radix Discord Server                  |
-
-## License
-
-The executable components of the Babylon Node code are licensed under the [Radix Node EULA](http://www.radixdlt.com/terms/nodeEULA).
-
-The Babylon Node code is released under the [Radix License 1.0 (modified Apache 2.0)](LICENSE):
-
-```
-Copyright 2023 Radix Publishing Ltd incorporated in Jersey, Channel Islands.
-
-Licensed under the Radix License, Version 1.0 (the "License"); you may not use
-this file except in compliance with the License.
-
-You may obtain a copy of the License at:
-https://www.radixfoundation.org/licenses/license-v1
-
-The Licensor hereby grants permission for the Canonical version of the Work to
-be published, distributed and used under or by reference to the Licensor’s
-trademark Radix® and use of any unregistered trade names, logos or get-up.
-
-The Licensor provides the Work (and each Contributor provides its Contributions)
-on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
-express or implied, including, without limitation, any warranties or conditions
-of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR
-PURPOSE.
-
-Whilst the Work is capable of being deployed, used and adopted (instantiated) to
-create a distributed ledger it is your responsibility to test and validate the
-code, together with all logic and performance of that code under all foreseeable
-scenarios.
-
-The Licensor does not make or purport to make and hereby excludes liability for
-all and any representation, warranty or undertaking in any form whatsoever,
-whether express or implied, to any entity or person, including any
-representation, warranty or undertaking, as to the functionality security use,
-value or other characteristics of any distributed ledger nor in respect the
-functioning or value of any tokens which may be created stored or transferred
-using the Work.
-
-The Licensor does not warrant that the Work or any use of the Work complies with
-any law or regulation in any territory where it may be implemented or used or
-that it will be appropriate for any specific purpose.
-
-Neither the licensor nor any current or former employees, officers, directors,
-partners, trustees, representatives, agents, advisors, contractors, or
-volunteers of the Licensor shall be liable for any direct or indirect, special,
-incidental, consequential or other losses of any kind, in tort, contract or
-otherwise (including but not limited to loss of revenue, income or profits, or
-loss of use or data, or loss of reputation, or loss of any economic or other
-opportunity of whatsoever nature or howsoever arising), arising out of or in
-connection with (without limitation of any use, misuse, of any ledger system or
-use made or its functionality or any performance or operation of any code or
-protocol caused by bugs or programming or logic errors or otherwise);
-
-A. any offer, purchase, holding, use, sale, exchange or transmission of any
-cryptographic keys, tokens or assets created, exchanged, stored or arising from
-any interaction with the Work;
-
-B. any failure in a transmission or loss of any token or assets keys or other
-digital artifacts due to errors in transmission;
-
-C. bugs, hacks, logic errors or faults in the Work or any communication;
-
-D. system software or apparatus including but not limited to losses caused by
-errors in holding or transmitting tokens by any third-party;
-
-E. breaches or failure of security including hacker attacks, loss or disclosure
-of password, loss of private key, unauthorised use or misuse of such passwords
-or keys;
-
-F. any losses including loss of anticipated savings or other benefits resulting
-from use of the Work or any changes to the Work (however implemented).
-
-You are solely responsible for; testing, validating and evaluation of all
-operation logic, functionality, security and appropriateness of using the Work
-for any commercial or non-commercial purpose and for any reproduction or
-redistribution by You of the Work. You assume all risks associated with Your use
-of the Work and the exercise of permissions under this Licence.
-```

@@ -48,7 +48,7 @@ not run anything else at the same time.
 
 ## A local lite validator
 
-Next to a local node (`./gradlew :core:run`, see the main [README](../../README.md)): mount the
+Next to a local node (`./gradlew :core:run`, see the [upstream README](../UPSTREAM-README.md)): mount the
 node's state database read-only in a mount namespace of your own (no root needed) and start the
 lite validator in it, with the configuration
 [`dev/lite-local.config.example`](dev/lite-local.config.example) (`LOCAL_DIR` replaced):
