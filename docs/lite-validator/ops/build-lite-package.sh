@@ -26,6 +26,7 @@ cp core/build/install/core/lib/*.jar "$P/lib/"
 cp core/build/liteScripts/lite-validator core/build/install/core/bin/keygen "$P/bin/"
 cp core-rust/target/release/libcorerust.so "$P/lib/native/"
 cp docs/lite-validator/ops/package/install.sh docs/lite-validator/ops/package/mainnet.config.lite-lines.example "$P/"
+cp LICENSE NOTICE "$P/"   # Radix License 4A/4D: the license and the notices go with every copy
 mkdir -p "$P/watchdog"
 cp docs/lite-validator/ops/radix-lite-watchdog.* "$P/watchdog/"
 # Safety net: the package must not contain an entry point for a standard node.
