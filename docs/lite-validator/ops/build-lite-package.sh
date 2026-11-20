@@ -11,7 +11,9 @@ cd "$REPO"
 COMMIT=$(git rev-parse --short=10 HEAD)
 VERSION="1.4.0.0-lite.$COMMIT"
 NAME="lite-validator-$VERSION"
-. "$HOME/.cargo/env"
+[ ! -f "$HOME/.cargo/env" ] || . "$HOME/.cargo/env"
+command -v cargo >/dev/null 2>&1 || { echo "ERROR: cargo not found; install Rust with rustup (see INSTALL.md)" >&2; exit 1; }
+command -v java >/dev/null 2>&1 || { echo "ERROR: java not found; install JDK 17 (see INSTALL.md)" >&2; exit 1; }
 
 echo "== Rust library (release)"
 (cd core-rust && cargo build --release -p jni-export)
@@ -25,7 +27,7 @@ mkdir -p "$P/bin" "$P/lib/native"
 cp core/build/install/core/lib/*.jar "$P/lib/"
 cp core/build/liteScripts/lite-validator core/build/install/core/bin/keygen "$P/bin/"
 cp core-rust/target/release/libcorerust.so "$P/lib/native/"
-cp docs/lite-validator/ops/package/install.sh docs/lite-validator/ops/package/mainnet.config.lite-lines.example "$P/"
+cp docs/lite-validator/ops/package/install.sh docs/lite-validator/ops/package/mainnet.config.lite-lines.example docs/lite-validator/ops/package/mainnet.config.example "$P/"
 cp LICENSE NOTICE "$P/"   # Radix License 4A/4D: the license and the notices go with every copy
 mkdir -p "$P/watchdog"
 cp docs/lite-validator/ops/radix-lite-watchdog.* "$P/watchdog/"

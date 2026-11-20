@@ -34,6 +34,11 @@ done
 [ -x "$PKG/bin/lite-validator" ] || fail "$PKG/bin/lite-validator is missing"
 [ -f "$PKG/lib/native/libcorerust.so" ] || fail "$PKG/lib/native/libcorerust.so is missing"
 command -v java >/dev/null 2>&1 || [ -n "${JAVA_HOME:-}" ] || fail "java not found"
+# The code is compiled with preview features of Java 17; other Java versions refuse to load it.
+JAVA_BIN=java
+[ -z "${JAVA_HOME:-}" ] || JAVA_BIN="$JAVA_HOME/bin/java"
+JAVA_MAJOR=$("$JAVA_BIN" -version 2>&1 | sed -n 's/.* version "\([0-9]*\).*/\1/p' | head -1)
+[ "$JAVA_MAJOR" = 17 ] || fail "Java 17 is needed, found: ${JAVA_MAJOR:-unknown} ($JAVA_BIN)"
 
 PRIMARY=$(conf 'lite\.primary_state_manager_path')
 OWN=$(conf 'db\.location')

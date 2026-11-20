@@ -15,11 +15,25 @@ The systemd unit is called `lite-<name of LITE_DIR>.service`, e.g. `lite-lite-1.
 
 ## 1. Requirements
 
+**Who does what.** Most steps can be done by an operator or by an assistant (for example a coding
+agent) with shell access. Three things are always the operator's: registering and staking the
+validator on ledger (step 6, needs a wallet and XRD), choosing and keeping the keystore password,
+and granting `sudo` on the validator host.
+
 **Validator host**
 
 - Linux with systemd; a Babylon node of the **same release** as the package (`v1.4.0.0`),
-  running as a systemd service and writing its database to `NODE_DB`.
-- Java 17 (e.g. `openjdk-17-jre-headless`); the package uses the system Java.
+  installed **directly on the host** (systemd service, e.g. `babylon-node.service`) and writing its
+  database to `NODE_DB`. This is the tested setup.
+- **Nodes in Docker** (e.g. set up with the `babylonnode` CLI in Docker mode) are **not tested**.
+  There the database is in a host directory mounted into the container, usually owned by the
+  container's user, and the configuration is generated from environment variables
+  (`docker/config/default.config.envsubst`), so there is no `mainnet.config` to copy. A lite
+  validator can in principle read such a database from the host (step 3: write a complete
+  `mainnet.config` from the example); check the permissions carefully and treat it as untested.
+- **Java 17 exactly** (e.g. `openjdk-17-jre-headless`); the package uses the system Java. The code
+  is compiled with preview features of Java 17 and does not run on other versions (also not on
+  21); `install.sh` checks this.
 - Per lite validator: ~3.5 GB RAM (measured peak 3.4 GB with `-Xmx768m`, see
   [TESTING.md](TESTING.md)) and a few GB of disk in `LITE_DIR`. Check first that the host has this
   memory to spare while the validator runs at its peak; the lite validator must not push the
@@ -31,7 +45,14 @@ The systemd unit is called `lite-<name of LITE_DIR>.service`, e.g. `lite-lite-1.
 
 **Build machine** (not the validator host)
 
-- Rust 1.92.0 (`rustup`), JDK 17, git, ~16 GB RAM (or swap), ~30 GB disk.
+- JDK 17, Rust via `rustup` (the version, 1.92.0, is chosen automatically from
+  `core-rust/rust-toolchain.toml`), ~16 GB RAM (or swap), ~30 GB disk. On Debian/Ubuntu:
+  ```bash
+  sudo apt-get install -y build-essential git curl unzip pkg-config libssl-dev libclang-dev \
+    openjdk-17-jdk-headless python3
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+  . "$HOME/.cargo/env"
+  ```
 - The same or an older Linux distribution than the validator host (the native library is linked
   against the build machine's glibc).
 
@@ -97,9 +118,19 @@ validator. 512 MB leaves ample room.
 
 ### mainnet.config
 
-Start from a copy of the validator's `mainnet.config` (network, genesis, seed nodes and so on stay
-the same) and then change it with the lines from
-[`mainnet.config.lite-lines.example`](ops/package/mainnet.config.lite-lines.example):
+`/opt/lite-1/mainnet.config`, two ways (both templates are in the package):
+
+- **With a validator configuration to copy** (the usual case): copy the validator's configuration
+  file (often `/etc/radixdlt/node/default.config` or `mainnet.config`; network, seed nodes and so
+  on stay the same) to `/opt/lite-1/mainnet.config` and change it with the lines from
+  [`mainnet.config.lite-lines.example`](ops/package/mainnet.config.lite-lines.example), as listed
+  below.
+- **Without one** (e.g. a node in Docker): start from the complete
+  [`mainnet.config.example`](ops/package/mainnet.config.example) and fill in the seed nodes (the
+  validator's list, or the current mainnet seed nodes from the official Radix node documentation)
+  and the host's public IP address. The mainnet genesis is built in.
+
+What must be different from the validator:
 
 - `node.key.path=/opt/lite-1/keystore.ks` and `db.location=/opt/lite-1/data` (both are checked by
   `install.sh`).
@@ -112,6 +143,8 @@ the same) and then change it with the lines from
   (`127.0.0.1`), not host names.
 - **Remove** the validator's `consensus.validator_address` for now. The first start is as a
   follower only (step 5).
+- Leave `api.system.enable_db_checkpoint` off (a lite validator refuses to create checkpoints,
+  they would hard-link the validator's files), and leave the `db.*` index settings as they are.
 
 All settings: [CONFIGURATION.md](CONFIGURATION.md).
 
@@ -177,8 +210,14 @@ behind. Let it run for a while (at least a few epoch changes) and watch the vali
 
 ## 6. Taking part in consensus
 
-1. Register a validator on ledger with the **public key of the lite validator** (step 3), in the
-   same way as for any Radix validator. It takes part when it is in the active set.
+1. **Operator:** create and register a validator on ledger with the **public key of the lite
+   validator** (printed by `keygen` in step 3), exactly as for any new Radix validator: a
+   transaction that creates the validator component with this key and a fee factor (it costs a
+   creation fee in XRD and gives you the owner badge), then registering it and accepting stake
+   with the owner badge. Follow the official Radix documentation for validators
+   (https://docs.radixdlt.com), which is kept up to date; nothing about this is specific to a lite
+   validator. The result is the validator address `validator_rdx1…`. The validator takes part when
+   its stake puts it into the active set (top 100), from the next epoch on.
 2. In `/opt/lite-1/mainnet.config` set:
    ```
    consensus.validator_address=<the address of the new validator>

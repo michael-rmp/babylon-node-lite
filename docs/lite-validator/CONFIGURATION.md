@@ -1,7 +1,9 @@
 # Configuration
 
 A lite validator uses the normal node configuration (`mainnet.config`) plus the `lite.*` settings
-below. The template is [`ops/package/mainnet.config.lite-lines.example`](ops/package/mainnet.config.lite-lines.example).
+below. Templates: [`ops/package/mainnet.config.lite-lines.example`](ops/package/mainnet.config.lite-lines.example)
+(the lines to change in a copy of the validator's configuration) and
+[`ops/package/mainnet.config.example`](ops/package/mainnet.config.example) (a complete file).
 
 All checks run before anything is opened or bound. A configuration error ends the process with
 exit code 78 and a message that names the setting; systemd does not restart it (see
