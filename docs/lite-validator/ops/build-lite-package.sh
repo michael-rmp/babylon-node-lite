@@ -15,6 +15,13 @@ NAME="lite-validator-$VERSION"
 command -v cargo >/dev/null 2>&1 || { echo "ERROR: cargo not found; install Rust with rustup (see INSTALL.md)" >&2; exit 1; }
 command -v java >/dev/null 2>&1 || { echo "ERROR: java not found; install JDK 17 (see INSTALL.md)" >&2; exit 1; }
 
+# The library would otherwise contain the absolute paths of this machine (the home directory,
+# the user name); mapped to neutral ones, the build is also the same on every machine.
+CARGO_DIR=${CARGO_HOME:-$HOME/.cargo}
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$CARGO_DIR=/cargo --remap-path-prefix=$REPO=/build"
+# The same for the C++ parts (RocksDB), which are compiled by the C/C++ compiler:
+export CFLAGS="${CFLAGS:-} -ffile-prefix-map=$CARGO_DIR=/cargo -ffile-prefix-map=$REPO=/build"
+export CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$CARGO_DIR=/cargo -ffile-prefix-map=$REPO=/build"
 echo "== Rust library (release)"
 (cd core-rust && cargo build --release -p jni-export)
 echo "== Java (jars and start scripts)"
