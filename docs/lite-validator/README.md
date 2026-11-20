@@ -81,6 +81,9 @@ Rules that follow from it:
 - **Start epoch:** after a start, the lite validator does not vote in the current epoch (it
   executes and proposes). This prevents a double vote after a restart. It votes again from the
   next epoch on.
+- **The standard node must be an active validator:** as a validator it has every committed block
+  in its database at once. A plain full node gets new blocks only through ledger sync, later; a
+  lite validator reading it would follow late and miss more proposals. Not supported, not tested.
 - **The standard node is needed:** if it stops, the lite validator keeps voting until 50
   consensus commits wait for the database (`lite.max_pending_committed`), then it stops voting
   and continues as soon as the standard node is back.

@@ -25,6 +25,11 @@ and granting `sudo` on the validator host.
 - Linux with systemd; a Babylon node of the **same release** as the package (`v1.4.0.0`),
   installed **directly on the host** (systemd service, e.g. `babylon-node.service`) and writing its
   database to `NODE_DB`. This is the tested setup.
+- **The node must itself be an active validator.** It then commits every block at once, and the
+  lite validator follows within a few hundred milliseconds. A plain full node as the source is not
+  supported and not tested: it learns about new blocks only through ledger sync, so the lite
+  validator would follow late and miss more proposals. (The lite validator also needs the node's
+  validator address, `lite.primary_validator_address`, to take part in consensus.)
 - **Nodes in Docker** (e.g. set up with the `babylonnode` CLI in Docker mode) are **not tested**.
   There the database is in a host directory mounted into the container, usually owned by the
   container's user, and the configuration is generated from environment variables

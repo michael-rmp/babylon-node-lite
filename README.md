@@ -21,7 +21,9 @@ node you already run. It needs ~3.5 GB of RAM and a few GB of disk.
 
 ## How it works
 
-- Your node keeps doing all the work of a node: it syncs, executes and stores the ledger.
+- Your node, itself an active validator, keeps doing all the work of a node: it executes,
+  commits and stores the ledger. Because it takes part in consensus, every block is in its database
+  as soon as it is committed.
 - The lite validator opens your node's database **read-only** and follows it every few hundred
   milliseconds. It has its own key and its own validator address, and takes part in consensus
   like any other validator: it proposes and votes.
@@ -30,8 +32,10 @@ node you already run. It needs ~3.5 GB of RAM and a few GB of disk.
 
 ## Who it is for
 
-Operators of a Radix validator node on Linux (systemd) who want to run one or more further
-validators, without paying for a further node each time.
+Operators who already run a Radix validator node on Linux (systemd) and want to run one or more
+further validators, without paying for a further node each time. The node whose ledger is shared
+must itself be an active validator; a plain full node as the source is not supported (see
+[limits](docs/lite-validator/README.md#limits)).
 
 ## Is it safe for my validator?
 
