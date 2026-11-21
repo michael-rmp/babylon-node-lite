@@ -319,8 +319,10 @@ unit `lite-lite-1.service`. It starts nothing and enables nothing.
 `MEMORY_MAX` is the hard memory limit of the unit (default 6G). With `-Xmx512m`, 4G leaves enough
 room in our measurements. If the lite validator reaches it, the kernel stops the lite validator
 and systemd restarts it after 120 s; the validator is not affected. `install.sh` writes the unit
-anew at every run: give the same `MEMORY_MAX` every time (also for updates), otherwise the default
-6G is written.
+anew at every run. Without `MEMORY_MAX` it keeps the value of the existing unit (and uses 6G only
+for a new one); the output shows where the value came from. The `install.sh` of release
+`v1.4.0.0-lite.1` does not do this yet and writes 6G without `MEMORY_MAX`, so the commands in this
+guide always give it.
 
 Have a look at the unit: `systemctl cat lite-lite-1.service`. Under the top directory of
 `NODE_DB` the process sees only the `state_manager` directory, read-only.

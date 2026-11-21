@@ -15,13 +15,23 @@ DIR=$(dirname "$PKG")
 NAME=$(basename "$DIR")
 UNIT="lite-$NAME.service"
 LITE_USER=${LITE_USER:-lite}
-MEMORY_MAX=${MEMORY_MAX:-6G}
 # Only for testing the script without root: writes the unit to \$UNIT_DIR and skips everything
 # that needs root (check of the lite user, owners and permissions, systemctl).
 UNIT_DIR=${UNIT_DIR:-/etc/systemd/system}
 TEST_ONLY=${TEST_ONLY:-0}
 
 fail() { echo "ERROR: $1" >&2; exit 1; }
+
+# The hard memory limit of the unit: MEMORY_MAX if given; otherwise the value of the existing unit
+# (an update or a second run keeps what the operator chose); otherwise 6G.
+if [ -n "${MEMORY_MAX:-}" ]; then
+  MEMORY_FROM="MEMORY_MAX"
+else
+  MEMORY_MAX=$(sed -n 's/^MemoryMax=//p' "$UNIT_DIR/$UNIT" 2>/dev/null | tail -1)
+  if [ -n "$MEMORY_MAX" ]; then MEMORY_FROM="kept from the existing unit"; else MEMORY_MAX=6G; MEMORY_FROM="default"; fi
+fi
+expr "$MEMORY_MAX" : '[0-9][0-9]*[KMGT]\{0,1\}$' >/dev/null \
+  || fail "MEMORY_MAX must be a number with an optional unit K, M, G or T (e.g. 4G, 3500M), is: $MEMORY_MAX"
 conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$DIR/mainnet.config" | tail -1; }
 
 if [ "$TEST_ONLY" != 1 ]; then
@@ -141,7 +151,7 @@ echo "OK: $UNIT written (not started, not enabled)."
 echo "  Directory:          $DIR"
 echo "  Package:            $PKG"
 echo "  Validator database: $PRIMARY (read-only)"
-echo "  Memory limit:       $MEMORY_MAX"
+echo "  Memory limit:       $MEMORY_MAX ($MEMORY_FROM)"
 echo "Start:   systemctl start $UNIT"
 echo "Log:     journalctl -u $UNIT -f"
 echo "Stop:    systemctl stop $UNIT"
