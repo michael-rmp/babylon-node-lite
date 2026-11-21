@@ -53,6 +53,23 @@ mainnet as a validator next to a standard validator since November 2026. Known l
 for a few minutes at a protocol update, does not vote in the epoch in which it was started, and
 may occasionally miss a proposal. See [limits](docs/lite-validator/README.md#limits).
 
+## Risks
+
+The safety layers above protect your validator's database. They do not remove every risk of
+running a second validator:
+
+- **Missed proposals.** The lite validator can miss proposals (at a protocol update, after a
+  restart, or when its catch-up with the database is late). This lowers the emissions for you and
+  for everyone who stakes on the lite validator.
+- **Load on your validator.** The lite validator uses memory and reads from your validator's disk.
+  On a host without enough spare memory it can slow your validator down. Watch your validator's
+  `missed_count`, above all in the first days.
+- **Double signing.** One key in two processes signs twice. Never copy `keystore.ks` to a second
+  lite validator, a second host or a backup that is started.
+- **Your responsibility.** You run it at your own risk, also towards the people who stake on your
+  validators. There is no warranty and no support; see sections 7 and 8 of the
+  [license](LICENSE).
+
 ## Getting started
 
 1. Read the [overview](docs/lite-validator/README.md).
