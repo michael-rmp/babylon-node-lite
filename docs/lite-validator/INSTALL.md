@@ -165,7 +165,8 @@ and granting `sudo` on the validator host.
 
 - Linux with systemd; a Babylon node of the **same release** as the package (`v1.4.0.0`),
   installed **directly on the host** (systemd service, e.g. `babylon-node.service`) and writing its
-  database to `NODE_DB`. This is the tested setup.
+  database to `NODE_DB`. This is the tested setup, on Ubuntu 22.04 with the database on ZFS
+  (details in [TESTING.md](TESTING.md#mainnet)).
 - **The node must itself be an active validator.** It then commits every block at once, and the
   lite validator follows within a few hundred milliseconds. A plain full node as the source is not
   supported and not tested: it learns about new blocks only through ledger sync, so the lite

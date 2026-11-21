@@ -73,7 +73,10 @@ and after each case. **It never changed: no case wrote to the validator's databa
 ## Mainnet
 
 One lite validator next to a standard validator on one host since mid-November 2026, first as a
-follower, then as a registered validator. Measured there:
+follower, then as a registered validator. The host: Ubuntu 22.04.5 LTS, kernel 5.15, glibc 2.35,
+OpenJDK 17.0.21, the validator's database on ZFS 2.1.5 (8 cores, 31 GB RAM); Babylon node
+`v1.4.0.0` as a systemd service. Other distributions and file systems (ext4, XFS) are not tested.
+Measured there:
 
 | Value | Result |
 |---|---|
