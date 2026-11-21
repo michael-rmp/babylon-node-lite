@@ -19,7 +19,9 @@ Every command in order, to copy and paste. The numbered sections below explain e
 them once before the first installation. Check the requirements (section 1) first, and stop at
 any error: nothing of your validator is changed by these steps, and stopping is always safe.
 
-**On the build machine** (not the validator host; see section 2):
+**Get the package**: either download `lite-validator-VERSION.tar.gz` and its `.sha256` from
+[Releases](https://github.com/michael-rmp/babylon-node-lite/releases), or build it yourself
+**on a build machine** (not the validator host; see section 2):
 
 ```bash
 git clone https://github.com/michael-rmp/babylon-node-lite.git
@@ -213,6 +215,12 @@ and `bin/keygen`; it cannot start a standard node. The build is reproducible: th
 built on another machine with the same distribution, gives the same `libcorerust.so` (its SHA-256 is
 in the `VERSION` file of the package; paths of the build machine are mapped to `/build` and
 `/cargo`), so a published package can be checked by building it again.
+
+**Released packages.** The packages on the
+[Releases](https://github.com/michael-rmp/babylon-node-lite/releases) page are built this way from
+the release tag on Ubuntu 22.04 (glibc 2.35); they need glibc 2.35 or newer on the validator host.
+To check one, build the tag yourself and compare `libcorerust_sha256` in the two `VERSION` files
+(the archives themselves differ, because they contain the build time).
 
 Copy both files to the validator host and check the checksum there:
 

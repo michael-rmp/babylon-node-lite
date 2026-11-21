@@ -60,8 +60,9 @@ may occasionally miss a proposal. See [limits](docs/lite-validator/README.md#lim
    every command in order, to copy and paste: build the package, create the user, create the key
    with `keygen`, write `environment` and `mainnet.config`, create the systemd service and the
    disk watchdog, start, register. Each step is explained in detail further down in
-   [INSTALL.md](docs/lite-validator/INSTALL.md). You need a build machine with 16 GB RAM, then
-   about an hour on the validator host.
+   [INSTALL.md](docs/lite-validator/INSTALL.md). Either download the package from
+   [Releases](https://github.com/michael-rmp/babylon-node-lite/releases) or build it yourself on a
+   build machine with 16 GB RAM; then about an hour on the validator host.
 3. Run it as a follower first, then register it as a validator.
 
 | Documentation | |
