@@ -90,6 +90,10 @@ Rules that follow from it:
 - **Latency:** a catch-up costs ~80–100 ms on mainnet (RocksDB builds a new view over all SST
   files). Proposals of the lite validator can therefore be slightly late; an occasional missed
   proposal is accepted.
+- **One lite validator per host tested:** a second (third, …) one on the same host should work the
+  same way, with its own key, directory and ports, but has not been run yet
+  ([INSTALL.md, section 9](INSTALL.md#9-a-second-lite-validator-on-the-same-host-not-tested)).
+  Each one needs ~3 GB more RAM at the validator's peak.
 - Linux with systemd only.
 
 ## Documents

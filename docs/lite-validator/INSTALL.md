@@ -146,6 +146,7 @@ sudo systemctl enable "$UNIT"
 ```
 
 Stop at any time: `sudo systemctl stop "$UNIT"`. Updates, the way back and removal: sections 7 and 8.
+A second lite validator on the same host (not tested): section 9.
 
 ## 1. Requirements
 
@@ -404,3 +405,81 @@ sudo rm /etc/systemd/system/lite-lite-1.service && sudo systemctl daemon-reload
 Unregister the validator on ledger first if it takes part in consensus. `/opt/lite-1` can then be
 deleted (keep the keystore if the validator may come back). Nothing of the standard node is
 changed by any of these steps.
+
+## 9. A second lite validator on the same host (not tested)
+
+> **Not tested.** Only one lite validator per host has run so far. The steps below follow from how
+> the parts work (every lite validator is a RocksDB secondary of its own, with its own key, data
+> directory, ports and unit), but nobody has run two at once yet. Watch the validator closely.
+
+**Memory first.** A second lite validator needs another ~3 GB at the validator's peak. On a host
+with ZFS this comes out of the ARC, which is the validator's read cache. Check `free -m` and the
+validator's `missed_count` at the daily peak before you start, and give the second one less:
+`MEMORY_MAX=3500M` and `lite.block_cache_mb=128`.
+
+**What is copied and what is not:**
+
+| Part | Copy? | Why |
+|---|---|---|
+| package directory `lite-validator-VERSION/` | yes | the same for every lite validator |
+| `keystore.ks` | **no, a new one with `keygen`** | the same key in two processes is the same validator twice and can sign twice |
+| `data/` | **no, start empty** | holds the safety store and the address book of the first one, bound to its key |
+| `logs/` | no | |
+| `environment` | new | password of the new keystore |
+| `mainnet.config` | copy and change | own `node.key.path`, `db.location`, ports; own validator address |
+
+Nothing needs to be built again. The watchdog (section 4) already covers every `lite-*.service`.
+
+```bash
+OLD_DIR=/opt/lite-1                               # the first lite validator
+LITE_DIR=/opt/lite-2                              # the second one
+VERSION=1.4.0.0-lite.0123456789                   # the package the first one runs
+PKG=$LITE_DIR/lite-validator-$VERSION
+UNIT=lite-$(basename "$LITE_DIR").service
+
+sudo mkdir -p "$LITE_DIR"
+sudo cp -a "$OLD_DIR/lite-validator-$VERSION" "$LITE_DIR/"
+
+read -rs PW
+sudo "$PKG/bin/keygen" --keystore="$LITE_DIR/keystore.ks" --password="$PW"
+sudo install -m 600 /dev/null "$LITE_DIR/environment"
+printf 'RADIX_NODE_KEYSTORE_PASSWORD=%s\nJAVA_OPTS=-Xms256m -Xmx512m -XX:MaxDirectMemorySize=1g\n' "$PW" \
+  | sudo tee "$LITE_DIR/environment" >/dev/null
+unset PW
+
+sudo cp "$OLD_DIR/mainnet.config" "$LITE_DIR/mainnet.config"
+sudo sed -i -E '/^[[:space:]]*(node\.key\.path|db\.location|consensus\.validator_address|lite\.(primary_validator_address|block_cache_mb)|network\.p2p\.(listen_port|broadcast_port)|api\.(core|system|prometheus|engine_state)\.port)[[:space:]]*=/d' "$LITE_DIR/mainnet.config"
+sudo tee -a "$LITE_DIR/mainnet.config" >/dev/null <<EOF
+
+# second lite validator
+node.key.path=$LITE_DIR/keystore.ks
+db.location=$LITE_DIR/data
+lite.block_cache_mb=128
+network.p2p.listen_port=30002
+network.p2p.broadcast_port=30002
+api.core.port=3353
+api.system.port=3354
+api.prometheus.port=3355
+api.engine_state.port=3356
+EOF
+sudo grep -nE '^(node\.key|db\.|lite\.|consensus\.|network\.p2p\.(listen|broadcast)|api\.)' "$LITE_DIR/mainnet.config"
+
+sudo MEMORY_MAX=3500M "$PKG/install.sh"
+```
+
+The `grep` must show the paths of `LITE_DIR`, the ports 30002 and 3353–3356, and no
+`consensus.validator_address`. The ports must differ from those of the first lite validator and
+of the node.
+
+Then as for the first one, with the new values:
+
+- First start as a follower only (section 5); health on port 3354, metrics on 3355. Do not start
+  it while the first one is still opening the database: two openings at once double the read
+  load on the validator's disk.
+- Taking part in consensus (section 6, or step 7 of the overview): register a **new** validator
+  with the new public key. `consensus.validator_address` is the new address, never the one of the
+  first lite validator; `lite.primary_validator_address` is your existing validator, as before.
+- `sudo systemctl enable "$UNIT"` once it runs well. After a reboot both lite validators start at
+  the same time after the node; this has not been tested either.
+
+Removal and updates: sections 7 and 8, for each directory.
