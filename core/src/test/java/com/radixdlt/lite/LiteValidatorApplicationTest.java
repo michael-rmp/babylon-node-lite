@@ -66,6 +66,9 @@ package com.radixdlt.lite;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.radixdlt.addressing.Addressing;
+import com.radixdlt.networks.Network;
+import com.radixdlt.rev2.ComponentAddress;
 import com.radixdlt.utils.properties.RuntimeProperties;
 import java.util.HashMap;
 import java.util.Map;
@@ -80,6 +83,16 @@ public final class LiteValidatorApplicationTest {
           "api.system.port", "3344",
           "api.prometheus.port", "3345",
           "api.engine_state.port", "3346");
+
+  private static final Addressing MAINNET = Addressing.ofNetwork(Network.MAINNET);
+
+  /** A well-formed validator address of the given network (not a registered validator). */
+  private static String validatorAddress(Addressing addressing, int seed) {
+    final var bytes = new byte[ComponentAddress.BYTE_LENGTH];
+    bytes[0] = ComponentAddress.VALIDATOR_COMPONENT_ADDRESS_ENTITY_ID;
+    bytes[ComponentAddress.BYTE_LENGTH - 1] = (byte) seed;
+    return addressing.encode(ComponentAddress.create(bytes));
+  }
 
   private static RuntimeProperties properties(Map<String, String> overrides) throws Exception {
     final var properties = RuntimeProperties.empty();
@@ -192,9 +205,66 @@ public final class LiteValidatorApplicationTest {
             Map.of(
                 "lite.primary_state_manager_path", "/radix/validator/data/state_manager",
                 "db.location", "/var/lib/lite-b/db",
-                "consensus.validator_address", "validator_rdx1own",
-                "lite.primary_validator_address", "validator_rdx1primary"));
+                "network.id", "1",
+                "consensus.validator_address", validatorAddress(MAINNET, 1),
+                "lite.primary_validator_address", validatorAddress(MAINNET, 2)));
     assertThat(LiteValidatorApplication.checkConfiguration(properties)).isEmpty();
+  }
+
+  @Test
+  public void a_mistyped_validator_address_is_refused() throws Exception {
+    final var own = validatorAddress(MAINNET, 1);
+    final var mistyped = own.substring(0, own.length() - 1) + (own.endsWith("q") ? "p" : "q");
+    final var properties =
+        complete(
+            Map.of(
+                "network.id",
+                "1",
+                "consensus.validator_address",
+                mistyped,
+                "lite.primary_validator_address",
+                validatorAddress(MAINNET, 2)));
+    assertThat(LiteValidatorApplication.checkConfiguration(properties))
+        .singleElement()
+        .satisfies(
+            problem ->
+                assertThat(problem)
+                    .startsWith("consensus.validator_address=" + mistyped)
+                    .contains("is not a validator address of network mainnet"));
+  }
+
+  @Test
+  public void a_validator_address_of_another_network_is_refused() throws Exception {
+    final var stokenet = Addressing.ofNetwork(Network.STOKENET);
+    final var properties =
+        complete(
+            Map.of(
+                "network.id", "1",
+                "consensus.validator_address", validatorAddress(MAINNET, 1),
+                "lite.primary_validator_address", validatorAddress(stokenet, 2)));
+    assertThat(LiteValidatorApplication.checkConfiguration(properties))
+        .singleElement()
+        .satisfies(
+            problem ->
+                assertThat(problem)
+                    .startsWith("lite.primary_validator_address=")
+                    .contains("they start with validator_rdx1"));
+  }
+
+  @Test
+  public void validator_addresses_without_a_known_network_are_refused() throws Exception {
+    final var addresses =
+        Map.of(
+            "consensus.validator_address", validatorAddress(MAINNET, 1),
+            "lite.primary_validator_address", validatorAddress(MAINNET, 2));
+    assertThat(LiteValidatorApplication.checkConfiguration(complete(addresses)))
+        .containsExactly("network.id is not set: it is needed to check the validator addresses");
+    final var unknown = complete(addresses);
+    unknown.set("network.id", "250");
+    assertThat(LiteValidatorApplication.checkConfiguration(unknown))
+        .containsExactly(
+            "network.id=250 is not a known network: it is needed to check the validator"
+                + " addresses");
   }
 
   @Test
@@ -273,7 +343,8 @@ public final class LiteValidatorApplicationTest {
                 "lite.gate_retries", "20",
                 "lite.max_consecutive_failures", "30",
                 "lite.max_pending_committed", "50"));
-    properties.set("lite.primary_validator_address", "validator_rdx1primary");
+    properties.set("network.id", "1");
+    properties.set("lite.primary_validator_address", validatorAddress(MAINNET, 2));
     properties.set("lite.malloc_trim_interval_s", "300");
     assertThat(properties.keys().stream().filter(k -> k.startsWith("lite.")))
         .containsExactlyInAnyOrderElementsOf(LiteConfig.KEYS);

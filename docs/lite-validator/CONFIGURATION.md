@@ -16,7 +16,7 @@ Unknown `lite.*` keys (e.g. a typo) are refused, and the message lists the valid
 | Key | Default | Allowed | Meaning |
 |---|---|---|---|
 | `lite.primary_state_manager_path` | – (mandatory) | path | The `state_manager` directory of the validator. Setting it makes the node a lite validator. Only read. Must not be writable for the process. |
-| `lite.primary_validator_address` | – | `validator_rdx1…` | The validator whose database is read. Mandatory together with `consensus.validator_address`; must differ from it. |
+| `lite.primary_validator_address` | – | `validator_rdx1…` | The validator whose database is read. Mandatory together with `consensus.validator_address`; must differ from it. Checked at the start: it must be a valid validator address of the network in `network.id`. |
 | `lite.max_open_files` | 500 | -1 or ≥ 20 | RocksDB `max_open_files` for the validator's database. Each open file costs ~0.4 MB on mainnet; -1 (all files) is not an option there. |
 | `lite.block_cache_mb` | 256 | ≥ 8 | Block cache, shared by all column families. |
 | `lite.cache_index_and_filter_blocks` | false | true/false | Keep index and filter blocks in the block cache (bounded, but re-read when evicted) instead of in memory while the file is open. |
@@ -35,7 +35,7 @@ Unknown `lite.*` keys (e.g. a typo) are refused, and the message lists the valid
 |---|---|
 | `db.location` | The lite validator's own directory (`LITE_DIR/data`). Must not contain, or be contained in, the validator's database or its directory. |
 | `node.key.path` | The lite validator's own keystore (`LITE_DIR/keystore.ks`). Never the validator's key. |
-| `consensus.validator_address` | The lite validator's own, registered validator address. Without it, the lite validator only follows. |
+| `consensus.validator_address` | The lite validator's own, registered validator address. Without it, the lite validator only follows. A mistyped address or one of another network is refused at the start (exit 78). |
 | `consensus.use_genesis_for_validator_address` | Refused. |
 | `network.p2p.listen_port`, `api.core.port`, `api.system.port`, `api.prometheus.port`, `api.engine_state.port` | Must not be a default port of a node (30000, 3333, 3334, 3335, 3336), also not by leaving the line out. |
 | `network.p2p.broadcast_port` | 30000 gives a warning only (port forwarding on the router is possible). |

@@ -66,12 +66,16 @@ package com.radixdlt.lite;
 
 import com.google.common.net.InetAddresses;
 import com.radixdlt.RadixNodeApplication;
+import com.radixdlt.addressing.Addressing;
+import com.radixdlt.networks.Network;
 import com.radixdlt.utils.properties.RuntimeProperties;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import org.apache.logging.log4j.LogManager;
 
@@ -189,6 +193,16 @@ public final class LiteValidatorApplication {
                 + " own");
       }
     }
+    // A mistyped address would otherwise stop the start much later, with an error that looks
+    // transient (and systemd would restart the process again and again):
+    if (!validatorAddress.isEmpty() || !primaryValidatorAddress.isEmpty()) {
+      checkValidatorAddresses(
+          properties,
+          Map.of(
+              "consensus.validator_address", validatorAddress,
+              "lite.primary_validator_address", primaryValidatorAddress),
+          problems);
+    }
 
     // Ports and addresses to bind to:
     final var defaultPorts = new TreeSet<>(NODE_DEFAULT_PORTS.values());
@@ -238,5 +252,48 @@ public final class LiteValidatorApplication {
       }
     }
     return problems;
+  }
+
+  /**
+   * Adds a problem for every configured address which is not a validator address of the network.
+   */
+  private static void checkValidatorAddresses(
+      RuntimeProperties properties, Map<String, String> addresses, List<String> problems) {
+    final var networkId = properties.get("network.id", "").trim();
+    final Optional<Network> network;
+    try {
+      network = networkId.isEmpty() ? Optional.empty() : Network.ofId(Integer.parseInt(networkId));
+    } catch (NumberFormatException e) {
+      problems.add("network.id=%s is not a number".formatted(networkId));
+      return;
+    }
+    if (network.isEmpty()) {
+      problems.add(
+          (networkId.isEmpty()
+                  ? "network.id is not set"
+                  : "network.id=%s is not a known network".formatted(networkId))
+              + ": it is needed to check the validator addresses");
+      return;
+    }
+    final var addressing = Addressing.ofNetwork(network.get());
+    new TreeMap<>(addresses)
+        .forEach(
+            (key, address) -> {
+              if (address.isEmpty()) {
+                return;
+              }
+              try {
+                addressing.decodeValidatorAddress(address);
+              } catch (RuntimeException e) {
+                problems.add(
+                    "%s=%s is not a validator address of network %s (they start with %s1): %s"
+                        .formatted(
+                            key,
+                            address,
+                            network.get().getLogicalName(),
+                            network.get().getValidatorHrp(),
+                            e.getMessage()));
+              }
+            });
   }
 }
