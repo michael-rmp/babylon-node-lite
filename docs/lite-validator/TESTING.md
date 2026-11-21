@@ -58,6 +58,7 @@ and after each case. **It never changed: no case wrote to the validator's databa
 | database missing, writable for the process, reached through a symlink and writable, `db.location` not writable | refused, exit 255 (may be transient at boot) |
 | wrong network, missing genesis | refused |
 | own address = validator's address, `lite.primary_validator_address` missing, `consensus.use_genesis_for_validator_address=true` | refused, exit 78 |
+| validator address mistyped (checksum), of another network (e.g. Stokenet in a mainnet configuration), or `network.id` missing | refused at the start, exit 78, the message names the setting; addresses of the configured network (also Stokenet with `network.id=2`) are accepted |
 | key of the validator, or address of a foreign validator | refused, exit 78, no restart |
 | own address registered with another key | runs as a follower, INFO message once (see [OPERATIONS.md](OPERATIONS.md)) |
 | ports of the running validator, or default ports (port lines forgotten) | refused before binding, exit 78 |

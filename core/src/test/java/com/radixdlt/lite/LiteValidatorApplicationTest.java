@@ -212,6 +212,24 @@ public final class LiteValidatorApplicationTest {
   }
 
   @Test
+  public void validator_addresses_of_the_configured_network_are_accepted() throws Exception {
+    final var stokenet = Addressing.ofNetwork(Network.STOKENET);
+    final var properties =
+        complete(
+            Map.of(
+                "network.id", "2",
+                "consensus.validator_address", validatorAddress(stokenet, 1),
+                "lite.primary_validator_address", validatorAddress(stokenet, 2)));
+    assertThat(LiteValidatorApplication.checkConfiguration(properties)).isEmpty();
+    properties.set("lite.primary_validator_address", validatorAddress(MAINNET, 2));
+    assertThat(LiteValidatorApplication.checkConfiguration(properties))
+        .singleElement()
+        .satisfies(
+            problem ->
+                assertThat(problem).contains("is not a validator address of network stokenet"));
+  }
+
+  @Test
   public void a_mistyped_validator_address_is_refused() throws Exception {
     final var own = validatorAddress(MAINNET, 1);
     final var mistyped = own.substring(0, own.length() - 1) + (own.endsWith("q") ? "p" : "q");
