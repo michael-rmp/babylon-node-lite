@@ -52,20 +52,24 @@ sudo mkdir -p "$LITE_DIR"
 sudo tar -C "$LITE_DIR" -xzf lite-validator-$VERSION.tar.gz
 ```
 
-2\. Key and `environment` (section 3). Choose a password without spaces, quotes or backslashes,
-and keep it (and later a copy of `keystore.ks`) in a safe place:
+2\. Key and `environment` (section 3). Choose a password of letters and digits only (no spaces,
+quotes, `$`, `%` or backslashes; e.g. 24 characters), and keep it (and later a copy of
+`keystore.ks`) in a safe place. The block does nothing if `keystore.ks` exists already: `keygen`
+on an existing keystore would replace the key.
 
 ```bash
-read -rs PW
+if sudo test -e "$LITE_DIR/keystore.ks"; then echo "keystore.ks exists already, nothing changed"; else
+read -rsp 'Keystore password: ' PW; echo
 sudo "$PKG/bin/keygen" --keystore="$LITE_DIR/keystore.ks" --password="$PW"
 sudo install -m 600 /dev/null "$LITE_DIR/environment"
 printf 'RADIX_NODE_KEYSTORE_PASSWORD=%s\nJAVA_OPTS=-Xms256m -Xmx512m -XX:MaxDirectMemorySize=1g\n' "$PW" \
   | sudo tee "$LITE_DIR/environment" >/dev/null
 unset PW
+fi
 ```
 
-`keygen` prints the public key of the lite validator; you need it to register the validator
-(step 7).
+`keygen` prints the public key of the lite validator (`Writing keypair 'node' [public key: …]`);
+you need it to register the validator (step 7).
 
 3\. `mainnet.config` from a copy of your validator's configuration (section 3): the lines that
 must differ are removed and appended anew. Without a configuration to copy (e.g. a node in
@@ -137,7 +141,7 @@ NODE_VALIDATOR=validator_rdx1...                  # your existing validator
 sudo sed -i -E '/^[[:space:]]*(consensus\.validator_address|lite\.primary_validator_address)[[:space:]]*=/d' "$LITE_DIR/mainnet.config"
 printf 'consensus.validator_address=%s\nlite.primary_validator_address=%s\n' "$LITE_VALIDATOR" "$NODE_VALIDATOR" \
   | sudo tee -a "$LITE_DIR/mainnet.config" >/dev/null
-sudo "$PKG/install.sh"
+sudo MEMORY_MAX=4G "$PKG/install.sh"                # the same MEMORY_MAX as in step 4
 sudo systemctl restart "$UNIT"
 ```
 
@@ -154,7 +158,7 @@ A second lite validator on the same host (not tested): section 9.
 
 **Who does what.** Most steps can be done by an operator or by an assistant (for example a coding
 agent) with shell access. Three things are always the operator's: registering and staking the
-validator on ledger (step 6, needs a wallet and XRD), choosing and keeping the keystore password,
+validator on ledger (section 6, needs a wallet and XRD), choosing and keeping the keystore password,
 and granting `sudo` on the validator host.
 
 **Validator host**
@@ -245,13 +249,17 @@ sudo tar -C /opt/lite-1 -xzf lite-validator-VERSION.tar.gz
 The lite validator needs a key of its own. Never copy the validator's keystore.
 
 ```bash
-read -rs PW   # the keystore password, not shown and not stored in the shell history
+read -rsp 'Keystore password: ' PW; echo   # not shown and not stored in the shell history
 sudo /opt/lite-1/lite-validator-VERSION/bin/keygen --keystore=/opt/lite-1/keystore.ks --password="$PW"
 sudo /opt/lite-1/lite-validator-VERSION/bin/keygen --keystore=/opt/lite-1/keystore.ks --password="$PW" --show-public-key
 unset PW
 ```
 
-Keep a backup of `keystore.ks` and the password in a safe place.
+Run the first `keygen` command only once: on an existing keystore it replaces the key (and a
+registered lite validator would lose its identity). The second command only shows the public key
+and can be run at any time. Use a password of letters and digits only: it goes into the
+`environment` file, where quotes, `$`, `%` and backslashes would be interpreted. Keep a backup of
+`keystore.ks` and the password in a safe place.
 
 ### environment
 
@@ -292,7 +300,7 @@ What must be different from the validator:
 - `api.core.bind_address` and `api.engine_state.bind_address` must be IP addresses
   (`127.0.0.1`), not host names.
 - **Remove** the validator's `consensus.validator_address` for now. The first start is as a
-  follower only (step 5).
+  follower only (section 5).
 - Leave `api.system.enable_db_checkpoint` off (a lite validator refuses to create checkpoints,
   they would hard-link the validator's files), and leave the `db.*` index settings as they are.
 
@@ -310,7 +318,9 @@ unit `lite-lite-1.service`. It starts nothing and enables nothing.
 
 `MEMORY_MAX` is the hard memory limit of the unit (default 6G). With `-Xmx512m`, 4G leaves enough
 room in our measurements. If the lite validator reaches it, the kernel stops the lite validator
-and systemd restarts it after 120 s; the validator is not affected.
+and systemd restarts it after 120 s; the validator is not affected. `install.sh` writes the unit
+anew at every run: give the same `MEMORY_MAX` every time (also for updates), otherwise the default
+6G is written.
 
 Have a look at the unit: `systemctl cat lite-lite-1.service`. Under the top directory of
 `NODE_DB` the process sees only the `state_manager` directory, read-only.
@@ -361,7 +371,7 @@ behind. Let it run for a while (at least a few epoch changes) and watch the vali
 ## 6. Taking part in consensus
 
 1. **Operator:** create and register a validator on ledger with the **public key of the lite
-   validator** (printed by `keygen` in step 3), exactly as for any new Radix validator: a
+   validator** (printed by `keygen` in section 3), exactly as for any new Radix validator: a
    transaction that creates the validator component with this key and a fee factor (it costs a
    creation fee in XRD and gives you the owner badge), then registering it and accepting stake
    with the owner badge. Follow the official Radix documentation for validators
@@ -376,7 +386,8 @@ behind. Let it run for a while (at least a few epoch changes) and watch the vali
    `lite.primary_validator_address` is mandatory together with `consensus.validator_address`;
    the start is refused if both are the same or if the lite validator's key is registered for
    the existing validator (exit code 78).
-3. `sudo /opt/lite-1/lite-validator-VERSION/install.sh` again (checks the new lines), then
+3. `sudo MEMORY_MAX=4G /opt/lite-1/lite-validator-VERSION/install.sh` again (checks the new
+   lines; give the same `MEMORY_MAX` as at the first run), then
    `sudo systemctl restart lite-lite-1.service`.
 
 In the epoch of the start, the lite validator does not vote (by design); it votes from the next
@@ -394,11 +405,12 @@ package built from the matching release.
 ```bash
 sudo tar -C /opt/lite-1 -xzf lite-validator-NEWVERSION.tar.gz
 sudo systemctl stop lite-lite-1.service
-sudo /opt/lite-1/lite-validator-NEWVERSION/install.sh     # the unit now points to the new package
+sudo MEMORY_MAX=4G /opt/lite-1/lite-validator-NEWVERSION/install.sh   # the unit now points to the new package
 sudo systemctl start lite-lite-1.service
 ```
 
-The old package directory stays. Way back: stop, run the old package's `install.sh`, start.
+The old package directory stays. Way back: stop, run the old package's `install.sh` (with the
+same `MEMORY_MAX`), start.
 `data/` (safety store, vertex store, address book) is kept across updates. **Never delete or reset
 `data/consensus_safety_store` while the validator is registered**: after a restart in the same
 epoch, the lite validator could otherwise vote twice in a round.
@@ -484,10 +496,11 @@ Then as for the first one, with the new values:
 - First start as a follower only (section 5); health on port 3354, metrics on 3355. Do not start
   it while the first one is still opening the database: two openings at once double the read
   load on the validator's disk.
-- Taking part in consensus (section 6, or step 7 of the overview): register a **new** validator
+- Taking part in consensus (section 6, or step 7 of the overview, there with
+  `MEMORY_MAX=3500M`): register a **new** validator
   with the new public key. `consensus.validator_address` is the new address, never the one of the
   first lite validator; `lite.primary_validator_address` is your existing validator, as before.
 - `sudo systemctl enable "$UNIT"` once it runs well. After a reboot both lite validators start at
   the same time after the node; this has not been tested either.
 
-Removal and updates: sections 7 and 8, for each directory.
+Removal and updates: sections 7 and 8, for each directory (with `MEMORY_MAX=3500M` for this one).
