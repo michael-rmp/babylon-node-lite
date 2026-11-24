@@ -63,7 +63,10 @@ needed.
 - **Reboot:** with the unit enabled, it starts after `babylon-node.service`. If it starts before
   the database is mounted, it ends with 255 and is restarted after 120 s.
 - **Disk:** keep enough free space on the validator's disk; the watchdog stops all lite
-  validators below `MIN_FREE_GB`.
+  validators below `MIN_FREE_GB`. The lite validator's own `data` directory needs up to ~2.5 GB:
+  almost all of it is the write-ahead log of the P2P address book, which swings between a few
+  hundred MB and ~2.5 GB and is freed again by RocksDB. The standard node does the same (same
+  code); on a compressing file system such as ZFS, `du` shows only a fraction of it.
 
 ## Moving a validator with a key change
 
