@@ -181,7 +181,7 @@ and granting `sudo` on the validator host.
 - **Java 17 exactly** (e.g. `openjdk-17-jre-headless`); the package uses the system Java. The code
   is compiled with preview features of Java 17 and does not run on other versions (also not on
   21); `install.sh` checks this.
-- Per lite validator: ~3 GB RAM (measured peak 2.99 GB over a day with `-Xmx512m`, see
+- Per lite validator: ~3 GB RAM (measured peak 3.23 GB over three days with `-Xmx512m`, see
   [TESTING.md](TESTING.md)) and a few GB of disk in `LITE_DIR`. Check first that the host has this
   memory to spare while the validator runs at its peak; the lite validator must not push the
   validator into memory pressure.

@@ -46,7 +46,7 @@ Measured on mainnet (one lite validator as an active validator, `MemoryMax=4G`):
 |---|---|
 | Java heap | grows to `-Xmx` as a validator, but the live set after GC is small (~80 MB on mainnet, 34–71 MB under heavy load locally); `-Xmx512m` is enough |
 | Native (Rust, RocksDB) | swings with the time of day, ~1.3–2.8 GB in use, no trend over days; block cache 256 MB, memtables ~240 MB, table readers ~180 MB |
-| Process (RSS) | ~1.7–3.0 GB with `-Xmx512m` (peak 2.99 GB over a day on mainnet); ~2.3–3.4 GB with `-Xmx768m`; peak 3.67 GB with `-Xmx1g` |
+| Process (RSS) | ~1.7–3.2 GB with `-Xmx512m` (peak 3.23 GB over three days on mainnet); ~2.3–3.4 GB with `-Xmx768m`; peak 3.67 GB with `-Xmx1g` |
 
 Settings that matter: `lite.malloc_trim_interval_s=300` (default; without it, freed memory is not
 returned and the process grows by hundreds of MB per hour), `MALLOC_ARENA_MAX=2` (set by the start
