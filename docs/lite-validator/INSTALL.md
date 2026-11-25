@@ -181,7 +181,7 @@ and granting `sudo` on the validator host.
 - **Java 17 exactly** (e.g. `openjdk-17-jre-headless`); the package uses the system Java. The code
   is compiled with preview features of Java 17 and does not run on other versions (also not on
   21); `install.sh` checks this.
-- Per lite validator: ~3 GB RAM (measured peak 3.23 GB over three days with `-Xmx512m`, see
+- Per lite validator: ~3.5 GB RAM (measured peak 3.23 GB over three days with `-Xmx512m`, see
   [TESTING.md](TESTING.md)) and a few GB of disk in `LITE_DIR`. Check first that the host has this
   memory to spare while the validator runs at its peak; the lite validator must not push the
   validator into memory pressure.
@@ -435,10 +435,11 @@ changed by any of these steps.
 > the parts work (every lite validator is a RocksDB secondary of its own, with its own key, data
 > directory, ports and unit), but nobody has run two at once yet. Watch the validator closely.
 
-**Memory first.** A second lite validator needs another ~3 GB at the validator's peak. On a host
+**Memory first.** A second lite validator needs another ~3.5 GB at the validator's peak. On a host
 with ZFS this comes out of the ARC, which is the validator's read cache. Check `free -m` and the
-validator's `missed_count` at the daily peak before you start, and give the second one less:
-`MEMORY_MAX=3500M` and `lite.block_cache_mb=128`.
+validator's `missed_count` at the daily peak before you start. Give the second one a smaller
+block cache, `lite.block_cache_mb=128`, and the same `MEMORY_MAX=4G` as the first one: a lower
+limit saves no memory, the unit only reaches it sooner and is restarted.
 
 **What is copied and what is not:**
 
@@ -487,7 +488,7 @@ api.engine_state.port=3356
 EOF
 sudo grep -nE '^(node\.key|db\.|lite\.|consensus\.|network\.p2p\.(listen|broadcast)|api\.)' "$LITE_DIR/mainnet.config"
 
-sudo MEMORY_MAX=3500M "$PKG/install.sh"
+sudo MEMORY_MAX=4G "$PKG/install.sh"
 ```
 
 The `grep` must show the paths of `LITE_DIR`, the ports 30002 and 3353–3356, and no
@@ -500,10 +501,10 @@ Then as for the first one, with the new values:
   it while the first one is still opening the database: two openings at once double the read
   load on the validator's disk.
 - Taking part in consensus (section 6, or step 7 of the overview, there with
-  `MEMORY_MAX=3500M`): register a **new** validator
+  `MEMORY_MAX=4G`): register a **new** validator
   with the new public key. `consensus.validator_address` is the new address, never the one of the
   first lite validator; `lite.primary_validator_address` is your existing validator, as before.
 - `sudo systemctl enable "$UNIT"` once it runs well. After a reboot both lite validators start at
   the same time after the node; this has not been tested either.
 
-Removal and updates: sections 7 and 8, for each directory (with `MEMORY_MAX=3500M` for this one).
+Removal and updates: sections 7 and 8, for each directory (with `MEMORY_MAX=4G` for this one).
